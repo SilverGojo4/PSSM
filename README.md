@@ -50,11 +50,23 @@ The environment includes:
 
 Make sure to update the environment file if dependencies change.
 
-### 💾 One-Time: Setup CDD Database for RPS-BLAST (Prerequisites)
+## 🧰 One-Time: Setup CDD Database for RPS-BLAST
 
-- Download the `.tar` archive of the **CDD profiles** from NCBI:
-  [https://ftp.ncbi.nih.gov/pub/mmdb/cdd/](https://ftp.ncbi.nih.gov/pub/mmdb/cdd/)
-- Place the downloaded file as: `blastdb/cdd.tar`
+### 💾 Prerequisites
+
+- Download the `.tar` archive of the **CDD profiles** (e.g. from NCBI FTP)
+- Place it as: `blastdb/cdd.tar`
+
+### ▶️ Run
+
+```bash
+bash scripts/setup_cdd.sh <PROJECT_DIR>
+```
+
+This will:
+
+- Extract `.smp` domain profiles
+- Create `Cdd.pn` and build RPS-BLAST DB via `makeprofiledb`
 
 ## 🧬 Stage 1: Fetch UniProt Sequences + Apply Mutations
 
