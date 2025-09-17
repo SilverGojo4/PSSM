@@ -5,8 +5,6 @@ A modular, CLI-based bioinformatics pipeline for:
 - Fetching **UniProt sequences** (wild-type and optionally mutated),
 - Running **PSI-BLAST** against NCBI’s **Conserved Domain Database (CDD)** to generate **PSSM** and **domain hit** annotations.
 
----
-
 ## 📁 Project Structure
 
 ```
@@ -27,8 +25,6 @@ AMPscope/
 └── blastdb/
     └── cdd/                     # RPS-BLAST CDD database
 ```
-
----
 
 ## 🚀 Getting Started
 
@@ -53,8 +49,6 @@ The environment includes:
 - `blast+` (for `psiblast`, `makeprofiledb`)
 
 Make sure to update the environment file if dependencies change.
-
----
 
 ## 🧬 Stage 1: Fetch UniProt Sequences + Apply Mutations
 
@@ -102,8 +96,6 @@ bash scripts/run_pssm.sh <PROJECT_DIR>
 - `results/pssm_raw/`: All `.pssm` and `.tsv` per sequence
 - `results/cdd_hits.tsv`: Aggregated domain hits
 
----
-
 ## 🧰 One-Time: Setup CDD Database for RPS-BLAST
 
 ### 💾 Prerequisites
@@ -121,8 +113,6 @@ This will:
 
 - Extract `.smp` domain profiles
 - Create `Cdd.pn` and build RPS-BLAST DB via `makeprofiledb`
-
----
 
 ## 🧠 Advanced Usage
 
@@ -146,8 +136,6 @@ python src/main.py \
   --pssm_hits results/cdd_hits.tsv
 ```
 
----
-
 ## 📊 Output Example
 
 Example line from `cdd_hits.tsv`:
@@ -157,27 +145,8 @@ qseqid      sseqid      evalue   bitscore   pident   length  qstart  qend  sstar
 P69905|A17V cd08953     1e-05     57.1      42.0      90      5       88     3      86
 ```
 
----
-
 ## ❗ Troubleshooting
 
 - ❌ **Missing UniProt ID**: Make sure `UniProt_ID` column exists (case-insensitive).
 - ❌ **Mutation failed**: Check format (e.g., `K23R`, not `23K→R`)
 - ❌ **CDD not found**: Ensure `.smp` files exist and `makeprofiledb` is installed.
-
----
-
-## 📄 License
-
-MIT License. See `LICENSE` file.
-
----
-
-## ✍️ Citation
-
-If you use this pipeline, please cite or reference:
-
-```
-Protein Analysis Pipeline for Mutation and Domain Context
-Developed by [Your Name / Lab], 2025.
-```
