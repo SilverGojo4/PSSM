@@ -138,13 +138,13 @@ python src/main.py \
   --uniprot_output_csv data/processed/uniprot_metadata.csv
 ```
 
-| Parameter                    | Description                                                                 |
-| ---------------------------- | --------------------------------------------------------------------------- |
-| `--stage uniprot_fetch`      | Selects the UniProt fetching pipeline stage                                 |
-| `--uniprot_input_path`       | Path to input file with `UniProt_ID` and optional `Mutation` column         |
-| `--uniprot_output_wt_fasta`  | Output FASTA file for **wild-type** sequences                               |
-| `--uniprot_output_mut_fasta` | Output FASTA file for **mutated** sequences (if `Mutation` column exists)   |
-| `--uniprot_output_csv`       | Output CSV file summarizing each sequence, mutation application, and status |
+| Parameter                  | Description                                                                 |
+| -------------------------- | --------------------------------------------------------------------------- |
+| `stage uniprot_fetch`      | Selects the UniProt fetching pipeline stage                                 |
+| `uniprot_input_path`       | Path to input file with `UniProt_ID` and optional `Mutation` column         |
+| `uniprot_output_wt_fasta`  | Output FASTA file for **wild-type** sequences                               |
+| `uniprot_output_mut_fasta` | Output FASTA file for **mutated** sequences (if `Mutation` column exists)   |
+| `uniprot_output_csv`       | Output CSV file summarizing each sequence, mutation application, and status |
 
 ---
 
@@ -159,13 +159,13 @@ python src/main.py \
   --pssm_hits results/cdd_hits.tsv
 ```
 
-| Parameter             | Description                                                                   |
-| --------------------- | ----------------------------------------------------------------------------- |
-| `--stage pssm_search` | Selects the PSI-BLAST pipeline stage                                          |
-| `--pssm_input_fasta`  | Input FASTA file (usually mutated sequences) to run PSI-BLAST on              |
-| `--pssm_cdd_db`       | Path to the **RPS-BLAST-compatible CDD database** (built via `makeprofiledb`) |
-| `--pssm_output_dir`   | Directory to store `.pssm` profiles and raw `_hits.tsv` files                 |
-| `--pssm_hits`         | Path to output aggregated domain hits table                                   |
+| Parameter           | Description                                                                   |
+| ------------------- | ----------------------------------------------------------------------------- |
+| `stage pssm_search` | Selects the PSI-BLAST pipeline stage                                          |
+| `pssm_input_fasta`  | Input FASTA file (usually mutated sequences) to run PSI-BLAST on              |
+| `pssm_cdd_db`       | Path to the **RPS-BLAST-compatible CDD database** (built via `makeprofiledb`) |
+| `pssm_output_dir`   | Directory to store `.pssm` profiles and raw `_hits.tsv` files                 |
+| `pssm_hits`         | Path to output aggregated domain hits table                                   |
 
 ## 📊 Output Example
 
