@@ -50,6 +50,14 @@ The environment includes:
 
 Make sure to update the environment file if dependencies change.
 
+## 🧰 One-Time: Setup CDD Database for RPS-BLAST
+
+### 💾 Prerequisites
+
+- Download the `.tar` archive of the **CDD profiles** from NCBI:
+  [https://ftp.ncbi.nih.gov/pub/mmdb/cdd/](https://ftp.ncbi.nih.gov/pub/mmdb/cdd/)
+- Place the downloaded file as: `blastdb/cdd.tar`
+
 ## 🧬 Stage 1: Fetch UniProt Sequences + Apply Mutations
 
 ### 🔧 Input Format
@@ -94,14 +102,6 @@ bash scripts/run_pssm.sh <PROJECT_DIR>
 - `results/pssm_raw/`: All `.pssm` and `.tsv` per sequence
 - `results/cdd_hits.tsv`: Aggregated domain hits
 
-## 🧰 One-Time: Setup CDD Database for RPS-BLAST
-
-### 💾 Prerequisites
-
-- Download the `.tar` archive of the **CDD profiles** from NCBI:
-  [https://ftp.ncbi.nih.gov/pub/mmdb/cdd/](https://ftp.ncbi.nih.gov/pub/mmdb/cdd/)
-- Place the downloaded file as: `blastdb/cdd.tar`
-
 ### ▶️ Run
 
 ```bash
@@ -141,10 +141,12 @@ After running the pipeline, the outputs are organized as follows:
 
 ```
 results/
-├── cdd_hits.tsv         # Aggregated domain hits (tabular format)
-└── pssm_raw/            # Per-sequence raw results
-    ├── P69905.pssm      # PSSM profile (ASCII format)
-    ├── P69905_hits.tsv  # PSI-BLAST domain hits for this sequence
+├── cdd_hits.tsv                                        # Aggregated domain hits (tabular format)
+└── pssm_raw/                                           # Per-sequence raw results
+    ├── P69905.pssm                                     # PSSM profile (ASCII format)
+    ├── P69905_hits.tsv                                 # PSI-BLAST domain hits for this sequence
+    ├── D4Z2G1_A53L(Based_on_UniProt_and_PDB).pssm      # PSSM profile (ASCII format)
+    ├── D4Z2G1_A53L(Based_on_UniProt_and_PDB)_hits.tsv  # PSI-BLAST domain hits for this sequence
     ├── ...
 ```
 
