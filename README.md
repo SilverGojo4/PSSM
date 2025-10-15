@@ -39,8 +39,6 @@ conda activate pssm
 
 Environment includes `biopython`, `pandas`, and `blast+`.
 
----
-
 ## One-Time: Setup CDD Database for RPS-BLAST
 
 ```bash
@@ -48,8 +46,6 @@ bash scripts/setup_cdd.sh <PROJECT_DIR>
 ```
 
 Extracts `.smp` profiles and builds RPS-BLAST DB (`Cdd.pn`).
-
----
 
 ## Stage 1 – CD-Search Alignment (RPS-BLAST)
 
@@ -80,8 +76,6 @@ P00004      gnl|CDD|231391 86.667   1.21e-58   175.0     1       105    MKTAYIAK
 P00651      gnl|CDD|238339 69.608   9.6e-47    146.0     29      130    YDNLKFLNVH...
 ```
 
----
-
 ## Stage 2 + 3 – Domain-Level PSI-BLAST and PSSM Feature Extraction
 
 This combined stage performs **PSI-BLAST** for all domain fragments obtained from Stage 1,
@@ -105,8 +99,6 @@ Generates `.pssm` profiles in `results/domain_psiblast/pssm_profiles/`.
 | `psi_metadata.tsv` | Run summary         |
 | `psi_error.log`    | Error log           |
 
----
-
 ### Step 3 – PSSM Feature Extraction and Matrix Computation
 
 Extracts 20×L PSSM matrices and computes Po / Hy / Ch + derived metrics.
@@ -127,8 +119,6 @@ pos  aa  A  R  N  D  C  Q  E  G  H  I  L  K  M  F  P  S  T  W  Y  V  Po  Hy  Ch 
 2    D  -2 -2  1  6 -4  0  2 -1 -1 -3 -4 -1 -3 -4 -2  0 -1 -4 -3 -3   3   6   7      10        1
 ```
 
----
-
 ## Unified Pipeline
 
 ```bash
@@ -141,8 +131,6 @@ bash scripts/pssm.sh <PROJECT_DIR>
 ```
 Input FASTA ─▶ CD-Search ─▶ Domain Fragments ─▶ PSI-BLAST ─▶ PSSM Matrices
 ```
-
----
 
 ## Final Output Hierarchy
 
@@ -160,5 +148,3 @@ results/
     ├── pssm_matrices/
     └── pssm_extract_error.log
 ```
-
----
