@@ -12,6 +12,8 @@ import time
 # ============================== Third-Party Library Imports ==============================
 import pandas as pd
 from Bio import SeqIO
+from Bio.Blast import NCBIXML
+from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 
 # ============================== Project Root Path Setup ==============================
@@ -28,11 +30,11 @@ def execute_cdsearch_single(seq_record, cdd_db: str, output_dir: str):
     os.makedirs(intermediate_dir, exist_ok=True)
 
     fasta_tmp = os.path.join(intermediate_dir, f"{seq_id}.fasta")
-    hits_out = os.path.join(intermediate_dir, f"{seq_id}.tsv")
+    xml_out = os.path.join(intermediate_dir, f"{seq_id}.xml")
 
-    if os.path.exists(hits_out):
+    if os.path.exists(xml_out):
         print(f"⏩ Skip {seq_id} (already completed)")
-        return hits_out, "skipped", ""
+        return xml_out, "skipped", ""
 
     SeqIO.write(seq_record, fasta_tmp, "fasta")
 
@@ -43,20 +45,21 @@ def execute_cdsearch_single(seq_record, cdd_db: str, output_dir: str):
         "-db",
         os.path.join(cdd_db, "Cdd"),
         "-outfmt",
-        "6 qseqid sseqid pident evalue bitscore qstart qend sstart send",
+        "5",  # XML format (contains alignment)
         "-evalue",
         "0.001",
         "-num_threads",
         "8",
+        "-out",
+        xml_out,
     ]
 
     try:
-        with open(hits_out, "w") as f:
-            subprocess.run(cmd, stdout=f, stderr=subprocess.PIPE, check=True)
-        if os.path.getsize(hits_out) == 0:
-            os.remove(hits_out)
+        subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+        if os.path.getsize(xml_out) == 0:
+            os.remove(xml_out)
             return None, "no_hit", "no domain alignment"
-        return hits_out, "success", ""
+        return xml_out, "success", ""
     except subprocess.CalledProcessError as e:
         with open(os.path.join(output_dir, "cdsearch_error.log"), "a") as log:
             log.write(f"{seq_id}\t{e}\n")
@@ -67,6 +70,51 @@ def execute_cdsearch_single(seq_record, cdd_db: str, output_dir: str):
                 os.remove(fasta_tmp)
             except Exception:
                 pass
+
+
+def parse_rpsblast_xml(xml_path: str, seq_id: str):
+    """Parse XML to extract detailed alignment info."""
+    results = []
+    try:
+        with open(xml_path) as f:
+            blast_records = NCBIXML.parse(f)
+            for record in blast_records:
+                for alignment in record.alignments:
+                    for hsp in alignment.hsps:
+                        qseq = hsp.query
+                        hseq = hsp.sbjct
+                        midline = hsp.match
+
+                        alignment_map = "".join(
+                            ["M" if c == "|" else "-" for c in midline]
+                        )
+
+                        results.append(
+                            {
+                                "query_id": seq_id,
+                                "PSSM_ID": alignment.hit_id.replace("gnl|CDD|", ""),
+                                "title": alignment.hit_def,
+                                "bitscore": hsp.bits,
+                                "evalue": hsp.expect,
+                                "pident": (
+                                    sum(c1 == c2 for c1, c2 in zip(qseq, hseq))
+                                    / len(qseq)
+                                )
+                                * 100,
+                                "qstart": hsp.query_start,
+                                "qend": hsp.query_end,
+                                "sstart": hsp.sbjct_start,
+                                "send": hsp.sbjct_end,
+                                "qseq": qseq,
+                                "hseq": hseq,
+                                "midline": midline,
+                                "alignment_map": alignment_map,
+                            }
+                        )
+        return results
+    except Exception as e:
+        print(f"⚠️ Error parsing XML for {seq_id}: {e}")
+        return []
 
 
 # ============================== Main Pipeline Function ==============================
@@ -95,7 +143,8 @@ def run_cdsearch_pipeline(**kwargs) -> None:
         total = len(seq_list)
         print(f"🔬 Total sequences to process: {total}\n")
 
-        results, metadata = [], []
+        all_results = []
+        metadata = []
         success = skipped = failed = nohit = 0
 
         # ===================== Run RPS-BLAST for each sequence =====================
@@ -105,31 +154,19 @@ def run_cdsearch_pipeline(**kwargs) -> None:
             print(f"▶️  [{idx:3d} / {total:<3d} | {progress:5.1f}% ]  {seq_id}")
             print("─" * 70)
 
-            hits_file, status, note = execute_cdsearch_single(
+            xml_file, status, note = execute_cdsearch_single(
                 seq_record, cdd_db, output_dir  # type: ignore
             )
 
-            if status == "success" and hits_file:
-                df = pd.read_csv(
-                    hits_file,
-                    sep="\t",
-                    header=None,
-                    names=[
-                        "qseqid",
-                        "PSSM_ID",
-                        "pident",
-                        "evalue",
-                        "bitscore",
-                        "qstart",
-                        "qend",
-                        "sstart",
-                        "send",
-                    ],
-                )
-                df["query_id"] = seq_id
-                results.append(df)
-                success += 1
-                print(f"   ✅ Alignment success for {seq_id}\n")
+            if status == "success" and xml_file:
+                parsed_hits = parse_rpsblast_xml(xml_file, seq_id)
+                if parsed_hits:
+                    all_results.extend(parsed_hits)
+                    success += 1
+                    print(f"   ✅ Alignment success for {seq_id}\n")
+                else:
+                    nohit += 1
+                    print(f"   ⚠️  No domains parsed from XML\n")
             elif status == "skipped":
                 skipped += 1
                 print(f"   ⏩ Skipped (already processed)\n")
@@ -149,39 +186,91 @@ def run_cdsearch_pipeline(**kwargs) -> None:
             )
 
         # ===================== Combine and Process Results =====================
-        hits_out_path = top_hits_path = domain_fasta_dir = meta_out_path = None
-        if results:
-            all_hits = pd.concat(results, ignore_index=True).sort_values(
-                by=["bitscore", "evalue"], ascending=[False, True]
-            )
-            hits_out_path = os.path.join(output_dir, "cdsearch_all_hits.tsv")  # type: ignore
-            all_hits.to_csv(hits_out_path, sep="\t", index=False)
+        detailed_out = os.path.join(output_dir, "cdsearch_all_hits_detailed.tsv")  # type: ignore
+        top_out = os.path.join(output_dir, "cdsearch_top_hits_detailed.tsv")  # type: ignore
+        meta_out = os.path.join(output_dir, "cdsearch_metadata.tsv")  # type: ignore
+        align_dir = os.path.join(output_dir, "alignment_blocks")  # type: ignore
+        fasta_dir = os.path.join(output_dir, "domains_fasta")  # type: ignore
+        query_dir = os.path.join(fasta_dir, "query")
+        query_with_gap_dir = os.path.join(fasta_dir, "query_with_gap")
+        hseq_with_gap_dir = os.path.join(fasta_dir, "hseq_with_gap")
+        os.makedirs(align_dir, exist_ok=True)
+        os.makedirs(fasta_dir, exist_ok=True)
+        os.makedirs(query_dir, exist_ok=True)
+        os.makedirs(query_with_gap_dir, exist_ok=True)
+        os.makedirs(hseq_with_gap_dir, exist_ok=True)
 
-            top_hits = all_hits.groupby("query_id", as_index=False).first()
-            domain_fasta_dir = os.path.join(output_dir, "domains_fasta")  # type: ignore
-            os.makedirs(domain_fasta_dir, exist_ok=True)
-            top_hits["domain_seq"] = None
+        if all_results:
+            df = pd.DataFrame(all_results)
+            df.to_csv(detailed_out, sep="\t", index=False)
+
+            # Get top hit for each query
+            top_hits = (
+                df.sort_values(by=["bitscore", "evalue"], ascending=[False, True])
+                .groupby("query_id", as_index=False)
+                .first()
+            )
 
             for _, row in top_hits.iterrows():
-                qid, start, end = row["query_id"], int(row["qstart"]), int(row["qend"])
-                pssm_id = row["PSSM_ID"].replace("gnl|CDD|", "")
-                domain_seq = seq_records[qid].seq[start - 1 : end]
-                top_hits.at[_, "domain_seq"] = str(domain_seq)  # type: ignore
+                qid = row["query_id"]
+                pssm_id = row["PSSM_ID"]
+                qseq = row["qseq"]
+                hseq = row["hseq"]
+                midline = row["midline"]
+                qstart, qend = int(row["qstart"]), int(row["qend"])
+
+                # --- Write alignment text file ---
+                align_txt = os.path.join(align_dir, f"{qid}_{pssm_id}.txt")
+                with open(align_txt, "w") as f:
+                    f.write(f">{qid} vs PSSM{pssm_id}\n")
+                    f.write(f"Query  {qstart:4d}  {qseq}  {qend}\n")
+                    f.write(f"        {midline}\n")
+                    f.write(
+                        f"Sbjct  {int(row['sstart']):4d}  {hseq}  {int(row['send'])}\n"
+                    )
+
+                # --- Write domain FASTA (remove gaps) ---
+                domain_seq = qseq.replace("-", "")
+                query_fragment = seq_records[qid].seq[qstart - 1 : qend]
                 SeqIO.write(
                     SeqRecord(
-                        domain_seq,
-                        id=f"{qid}_{pssm_id}",
-                        description=f"domain_fragment {start}-{end}",
+                        query_fragment,
+                        id=f"{qid}_{pssm_id}_query_fragment",
+                        description=f"domain_fragment {qstart}-{qend}",
                     ),
-                    os.path.join(domain_fasta_dir, f"{qid}_{pssm_id}.fasta"),
+                    os.path.join(query_dir, f"{qid}_{pssm_id}_query_fragment.fasta"),
                     "fasta",
                 )
 
-            top_hits_path = os.path.join(output_dir, "cdsearch_top_hits.tsv")  # type: ignore
-            top_hits.to_csv(top_hits_path, sep="\t", index=False)
+                # --- Write query WITH gaps (aligned qseq) ---
+                SeqIO.write(
+                    SeqRecord(
+                        seq=Seq(qseq),
+                        id=f"{qid}_{pssm_id}_query_with_gap",
+                        description=f"aligned_query_with_gap {qstart}-{qend}",
+                    ),
+                    os.path.join(
+                        query_with_gap_dir, f"{qid}_{pssm_id}_query_with_gap.fasta"
+                    ),
+                    "fasta",
+                )
 
-        meta_out_path = os.path.join(output_dir, "cdsearch_metadata.tsv")  # type: ignore
-        pd.DataFrame(metadata).to_csv(meta_out_path, sep="\t", index=False)
+                # --- Write query WITH gaps (aligned hseq) ---
+                SeqIO.write(
+                    SeqRecord(
+                        seq=Seq(hseq),
+                        id=f"{qid}_{pssm_id}_hseq_with_gap",
+                        description=f"aligned_hseq_with_gap sstart={row['sstart']} send={row['send']}",
+                    ),
+                    os.path.join(
+                        hseq_with_gap_dir, f"{qid}_{pssm_id}_hseq_with_gap.fasta"
+                    ),
+                    "fasta",
+                )
+
+            top_hits.to_csv(top_out, sep="\t", index=False)
+
+        pd.DataFrame(metadata).to_csv(meta_out, sep="\t", index=False)
 
         # ===================== Pretty Console Output =====================
         elapsed = time.time() - start_time
@@ -189,15 +278,13 @@ def run_cdsearch_pipeline(**kwargs) -> None:
         print("║" + " " * 24 + "CD-Search Alignment Summary" + " " * 19 + "║")
         print("╚" + "═" * 70 + "╝\n")
 
-        print("📄 Output Files")
+        print("\n📄 Output Files")
         print("─" * 70)
-        if hits_out_path:
-            print(f"✅ Alignment results : {hits_out_path}")
-        if top_hits_path:
-            print(f"⭐ Top domain hits   : {top_hits_path}")
-        if domain_fasta_dir:
-            print(f"📁 Domain FASTAs     : {domain_fasta_dir}")
-        print(f"🧾 Metadata summary  : {meta_out_path}\n")
+        print(f"✅ Detailed hits    : {detailed_out}")
+        print(f"⭐ Top domain hits  : {top_out}")
+        print(f"📁 Alignment blocks : {align_dir}")
+        print(f"📁 Domain FASTAs    : {fasta_dir}")
+        print(f"🧾 Metadata summary : {meta_out}\n")
 
         print("📊 Summary Statistics")
         print("─" * 70)
@@ -208,7 +295,7 @@ def run_cdsearch_pipeline(**kwargs) -> None:
         print(f"Failed          : {failed}\n")
 
         print(f"⏱️  Elapsed time : {elapsed:.2f} seconds")
-        print("✅  CD-Search stage completed successfully!\n")
+        print("✅  Accurate CD-Search stage completed successfully!\n")
 
     except Exception as e:
         print(f"\n❌ Critical error in run_cdsearch_pipeline(): {e}")

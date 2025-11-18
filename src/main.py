@@ -30,6 +30,10 @@ SUPPORTED_STAGES = {
         "title": "Compute Hy/Ch/Po features from PSSM profiles",
         "import_path": "src.preprocess.run_pssm_features.run_pssm_extract_matrix",
     },
+    "pssm_reconstruct": {
+        "title": "Reconstruct full-length Lx20 PSSM matrix using alignment",
+        "import_path": "src.preprocess.run_pssm_reconstruct.run_pssm_reconstruct",
+    },
 }
 
 
@@ -111,6 +115,11 @@ def main():
         type=str,
         help="Path to local CDD BLAST database (used for both CD-Search and PSI-BLAST).",
     )
+    parser.add_argument(
+        "--cdsearch_cddid_tbl",
+        type=str,
+        help="Path to cddid_all.tbl mapping file for CDD PSSM IDs.",
+    )
 
     # -------------------- Domain PSI-BLAST Args --------------------
     parser.add_argument(
@@ -148,6 +157,31 @@ def main():
         "--pssm_matrix_output_dir",
         type=str,
         help="Output directory where features/ and summary TSVs will be written (e.g., results/domain_psiblast).",
+    )
+
+    # -------------------- PSSM Reconstruction Args --------------------
+    parser.add_argument(
+        "--pssm_fasta_path",
+        type=str,
+        help="Original input FASTA (full-length sequences).",
+    )
+
+    parser.add_argument(
+        "--pssm_cdsearch_table",
+        type=str,
+        help="CD-Search result table: cdsearch_top_hits_detailed.tsv",
+    )
+
+    parser.add_argument(
+        "--pssm_matrix_dir",
+        type=str,
+        help="Directory containing domain-level PSSM matrices (pssm_matrices/).",
+    )
+
+    parser.add_argument(
+        "--pssm_reconstruct_output",
+        type=str,
+        help="Output directory for reconstructed full-length PSSM matrices.",
     )
 
     # -------------------- Parse & Dispatch --------------------

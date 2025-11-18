@@ -41,6 +41,15 @@ fi
 # 自動建立 profile list (Cdd.pn)
 ls *.smp > Cdd.pn
 
+# Get the base directory of the Conda installation
+CONDA_BASE=$(conda info --base)
+
+# Source the Conda initialization script to enable 'conda' commands
+source "$CONDA_BASE/etc/profile.d/conda.sh"
+
+# Activate the Conda environment
+conda activate pssm
+
 # 使用 makeprofiledb 建立 RPS-BLAST 資料庫
 makeprofiledb -in Cdd.pn -out Cdd -dbtype rps -title "Conserved Domain Database (CDD)"
 
@@ -49,3 +58,6 @@ echo "📂 Verifying generated files ..."
 ls -lh Cdd.*
 
 echo "✅ CDD setup completed successfully!"
+
+# Deactivate the Conda environment
+conda deactivate

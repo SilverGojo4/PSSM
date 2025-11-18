@@ -12,12 +12,12 @@ from glob import glob
 import pandas as pd
 
 # ============================== Constants ==============================
-AA_ORDER = list("ARNDCQEGHILKMFPSTWYV")
+AA_ORDER = list("GAILVMFWPCSTYNQHKRDE")
 
 
 # ============================== Helper Function ==============================
 def _extract_score_matrix(pssm_file: str) -> pd.DataFrame:
-    """Extract only the 20×L score matrix (A..V) from ASCII PSSM."""
+    """Extract only the 20xL score matrix (A..V) from ASCII PSSM."""
     with open(pssm_file) as f:
         lines = f.readlines()
 
@@ -44,7 +44,7 @@ def _extract_score_matrix(pssm_file: str) -> pd.DataFrame:
         pos = int(parts[0])
         aa = parts[1]
         scores = list(map(int, parts[2:22]))
-        row = {"pos": pos, "aa": aa}
+        row = {"Position": pos, "Residue": aa}
         for sym, sc in zip(AA_ORDER, scores):
             row[sym] = sc
 
@@ -72,7 +72,9 @@ def _extract_score_matrix(pssm_file: str) -> pd.DataFrame:
 
     return pd.DataFrame(
         rows,
-        columns=["pos", "aa"] + AA_ORDER + ["Po", "Hy", "Ch", "Hy+Ch-Po", "|Hy-Ch|"],
+        columns=["Position", "Residue"]
+        + AA_ORDER
+        + ["Po", "Hy", "Ch", "Hy+Ch-Po", "|Hy-Ch|"],
     )
 
 
