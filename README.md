@@ -11,19 +11,27 @@ PSSM/
 │   └── preprocess/
 │       ├── run_cdsearch.py
 │       ├── run_domain_psiblast.py
-│       └── run_pssm_features.py
+│       ├── run_pssm_features
+│       ├── run_pssm_reconstruct.py
+│       └── run_conservation_reconstruct
+│
 ├── scripts/
 │   ├── setup_cdd.sh             # One-time setup for CDD RPS-BLAST DB
 │   ├── cdsearch.sh              # Run CD-Search alignment stage
-│   └── pssm.sh                  # Run PSI-BLAST and PSSM feature extraction (Stage 2+3)
+│   ├── pssm.sh                  # Run PSI-BLAST and PSSM feature extraction (Stage 2+3)
+│   └── conservation.sh          # Run conservation score reconstruction (Stage 4)
+│
 ├── data/
 │   ├── raw/                     # Input protein lists
-│   ├── processed/               # FASTA files and metadata
+│   └── processed/               # FASTA files and metadata
+│
 └── blastdb/
-│   └── cdd/                     # RPS-BLAST CDD database
+│   ├── cdd/                     # RPS-BLAST CDD database
 │   └── cdd.tar                  # Archived CDD package
+│
 ├── env/
 │   └── pssm.yml                 # Conda environment definition
+│
 ├── docs/
 │   └── workflow_diagram.jpg     # Full process flowchart (as reference)
 ```
@@ -146,11 +154,56 @@ pos  aa  A  R  N  D  C  Q  E  G  H  I  L  K  M  F  P  S  T  W  Y  V  Po  Hy  Ch 
 2    D  -2 -2  1  6 -4  0  2 -1 -1 -3 -4 -1 -3 -4 -2  0 -1 -4 -3 -3   3   6   7      10        1
 ```
 
+## Stage 4 – Conservation Score Reconstruction (Scorecons)
+
+This stage reconstructs **full-length residue-wise evolutionary conservation scores**
+by projecting **domain-level Scorecons results** back to original protein coordinates
+using CD-Search alignment information.
+
+This step integrates **external MSA-based conservation analysis**
+with the internally reconstructed **full-length PSSM tables**.
+
+### ⚠️ Important Prerequisite: Scorecons Server Results
+
+Stage 4 **does not perform multiple sequence alignment (MSA) or conservation calculation**.
+
+Users must first compute conservation scores externally using the
+**Scorecons web server** and place the resulting files into the designated directory.
+
+### Required Directory Structure
+
+Before running this stage, the following directory structure must exist:
+
+```
+results/
+└── conservation/
+│   ├── scorecons/
+│       └── *.txt
+```
+
+The `query_id` must exactly match the FASTA header and CD-Search query ID.
+
+During execution, the pipeline will automatically create:
+
+```
+results/
+└── conservation/
+│   ├── reconstruct/
+│       └── *.tsv
+```
+
+### Run
+
+```bash
+bash scripts/conservation.sh <PROJECT_DIR> [/path/to/input.fasta]
+```
+
 ## Unified Pipeline
 
 ```bash
 bash scripts/cdsearch.sh <PROJECT_DIR> [/path/to/input.fasta]
 bash scripts/pssm.sh <PROJECT_DIR> [/path/to/input.fasta]
+bash scripts/conservation.sh <PROJECT_DIR> [/path/to/input.fasta]
 ```
 
 **Data Flow:**
@@ -163,6 +216,8 @@ Input FASTA
  ─▶ Domain PSSM Profiles
  ─▶ Domain PSSM Matrices
  ─▶ Full-length PSSM Reconstruction
+ ─▶ Scorecons (external)
+ ─▶ Conservation Reconstruction
 ```
 
 ## Final Output Hierarchy
@@ -170,10 +225,11 @@ Input FASTA
 ```
 results/
 ├── cdsearch_results/
-│   ├── cdsearch_all_hits.tsv
-│   ├── cdsearch_top_hits.tsv
-│   ├── cdsearch_top_hits_detailed.tsv
+│   ├── alignment_blocks/
+│   ├── intermediate/
 │   ├── domains_fasta/
+│   ├── cdsearch_all_hits_detailed.tsv
+│   ├── cdsearch_top_hits_detailed.tsv
 │   └── cdsearch_metadata.tsv
 │
 ├── domain_psiblast/
@@ -182,7 +238,13 @@ results/
 │   ├── pssm_profiles/
 │   ├── pssm_matrices/
 │   ├── pssm_reconstruct/
-│   │   └── *.tsv
+│       └── *.tsv
 │   ├── pssm_extract_error.log
 │   └── pssm_reconstruct_error.log
+│
+└── conservation/
+│   ├── scorecons/
+│       └── *.txt
+│   ├── reconstruct/
+│       └── *.tsv
 ```

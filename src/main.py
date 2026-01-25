@@ -34,6 +34,10 @@ SUPPORTED_STAGES = {
         "title": "Reconstruct full-length Lx20 PSSM matrix using alignment",
         "import_path": "src.preprocess.run_pssm_reconstruct.run_pssm_reconstruct",
     },
+    "conservation_reconstruct": {
+        "title": "Reconstruct full-length conservation scores using alignment",
+        "import_path": "src.preprocess.run_conservation_reconstruct.run_conservation_reconstruct",
+    },
 }
 
 
@@ -169,6 +173,31 @@ def main():
         "--pssm_cdsearch_table",
         type=str,
         help="CD-Search result table: cdsearch_top_hits_detailed.tsv",
+    )
+
+    # -------------------- Conservation Reconstruction Args --------------------
+    parser.add_argument(
+        "--conservation_fasta_path",
+        type=str,
+        help="Original input FASTA (full-length sequences).",
+    )
+
+    parser.add_argument(
+        "--conservation_cdsearch_table",
+        type=str,
+        help="CD-Search result table: cdsearch_top_hits_detailed.tsv",
+    )
+
+    parser.add_argument(
+        "--pssm_reconstruct_dir",
+        type=str,
+        help="Directory containing reconstructed full-length PSSM tables.",
+    )
+
+    parser.add_argument(
+        "--conservation_dir",
+        type=str,
+        help="Directory containing Scorecons server results (*.txt).",
     )
 
     # -------------------- Parse & Dispatch --------------------
