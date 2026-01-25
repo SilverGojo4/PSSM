@@ -31,6 +31,7 @@ fi
 CDSEARCH_DIR="$PROJECT_DIR/results/cdsearch_results"
 PSSM_RECONSTRUCT_DIR="$PROJECT_DIR/results/domain_psiblast/pssm_reconstruct"
 CONSERVATION_DIR="$PROJECT_DIR/results/conservation"
+EVOLUTIONARY_CONSERVATION_DIR="$PROJECT_DIR/results/evolutionary_conservation"
 
 # ======================================================
 # Check conservation input directory
@@ -50,14 +51,23 @@ source "$CONDA_BASE/etc/profile.d/conda.sh"
 conda activate pssm
 
 # ======================================================
-# Conservation reconstruction stage
+# Stage 1: Scorecons reconstruction (alignment-based)
 # ======================================================
 python "$PROJECT_DIR/src/main.py" \
-  --stage conservation_reconstruct \
+  --stage scorecons_reconstruct \
   --conservation_fasta_path "$INPUT_FASTA" \
   --conservation_cdsearch_table "$CDSEARCH_DIR/cdsearch_top_hits_detailed.tsv" \
   --pssm_reconstruct_dir "$PSSM_RECONSTRUCT_DIR" \
   --conservation_dir "$CONSERVATION_DIR"
+
+# ======================================================
+# Stage 2: ConSurf integration (annotation-based)
+# ======================================================
+python "$PROJECT_DIR/src/main.py" \
+  --stage consurf_integrate \
+  --conservation_fasta_path "$INPUT_FASTA" \
+  --conservation_reconstruct_dir "$CONSERVATION_DIR/reconstruct" \
+  --conservation_dir "$EVOLUTIONARY_CONSERVATION_DIR"
 
 # ======================================================
 # Deactivate conda environment

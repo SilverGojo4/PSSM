@@ -34,9 +34,13 @@ SUPPORTED_STAGES = {
         "title": "Reconstruct full-length Lx20 PSSM matrix using alignment",
         "import_path": "src.preprocess.run_pssm_reconstruct.run_pssm_reconstruct",
     },
-    "conservation_reconstruct": {
-        "title": "Reconstruct full-length conservation scores using alignment",
-        "import_path": "src.preprocess.run_conservation_reconstruct.run_conservation_reconstruct",
+    "scorecons_reconstruct": {
+        "title": "Reconstruct full-length conservation scores using Scorecons alignment",
+        "import_path": "src.preprocess.run_scorecons_integrate.run_scorecons_reconstruct",
+    },
+    "consurf_integrate": {
+        "title": "Integrate ConSurf residue-level conservation scores",
+        "import_path": "src.preprocess.run_consurf_integrate.run_consurf_integrate",
     },
 }
 
@@ -198,6 +202,12 @@ def main():
         "--conservation_dir",
         type=str,
         help="Directory containing Scorecons server results (*.txt).",
+    )
+
+    parser.add_argument(
+        "--conservation_reconstruct_dir",
+        type=str,
+        help="Directory containing reconstructed conservation tables (Scorecons output).",
     )
 
     # -------------------- Parse & Dispatch --------------------
