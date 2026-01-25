@@ -9,9 +9,8 @@ Design principles
 - No alignment
 - No gaps
 - Variant-aware
-- Offset-free
-- Window-based sequence mapping
-- Reference sequence is the absolute coordinate system
+- Window-based local sequence mapping
+- Reference sequence (UniProt) is absolute coordinate system
 """
 
 # ============================== Standard Library Imports ==============================
@@ -26,7 +25,6 @@ from Bio import SeqIO
 
 # ============================== Helper Functions ==============================
 def _load_original_sequences(fasta_path: str) -> dict:
-    """Return {seq_id: sequence} dict."""
     if not os.path.exists(fasta_path):
         raise FileNotFoundError(f"Input FASTA not found: {fasta_path}")
     return {rec.id: str(rec.seq) for rec in SeqIO.parse(fasta_path, "fasta")}
@@ -39,14 +37,6 @@ def _load_base_reconstruct_table(path: str) -> pd.DataFrame:
 
 
 def _parse_consurf_grades(path: str) -> pd.DataFrame:
-    """
-    Parse ConSurf grades file.
-
-    Return columns:
-        pos (int)   - position in ConSurf sequence (1-based)
-        aa (str)    - amino acid
-        score (float)
-    """
     records = []
 
     with open(path) as f:
@@ -92,15 +82,10 @@ def _parse_consurf_grades(path: str) -> pd.DataFrame:
 
 
 def _build_consurf_sequence(consurf_df: pd.DataFrame) -> str:
-    """Build linear ConSurf sequence string."""
     return "".join(consurf_df.sort_values("pos")["aa"].tolist())
 
 
 def _parse_mutation(query_id: str):
-    """
-    Example:
-        P01857_L125C  -> (125, 'L', 'C')
-    """
     try:
         mut = query_id.split("_")[1]
         from_aa = mut[0]
@@ -112,7 +97,6 @@ def _parse_mutation(query_id: str):
 
 
 def _restore_reference_sequence(seq: str, mut_pos, mut_from):
-    """Replace mutated residue back to reference amino acid."""
     if mut_pos is None:
         return seq
 
@@ -122,97 +106,105 @@ def _restore_reference_sequence(seq: str, mut_pos, mut_from):
     return seq
 
 
-def _find_consurf_start(
-    full_seq: str,
+# ============================== Core Mapping Logic ==============================
+def _find_best_local_mapping(
+    ref_seq: str,
     consurf_seq: str,
-    max_mismatch: int = 10,
+    window: int = 25,
+    max_mismatch: int = 5,
 ):
     """
-    Find where ConSurf sequence maps onto full-length sequence.
+    Find best local matching region between two sequences.
 
     Returns:
-        start_index (0-based)
-        mismatch_count
+        ref_start (0-based)
+        consurf_start (0-based)
+        mismatch
     """
 
-    L = len(consurf_seq)
+    best = None
 
-    best_start = None
-    best_mismatch = float("inf")
+    def scan(seq_a, seq_b, label):
+        nonlocal best
 
-    for i in range(len(full_seq) - L + 1):
-        window = full_seq[i : i + L]
+        for i in range(len(seq_a) - window + 1):
+            anchor = seq_a[i : i + window]
 
-        mismatch = sum(1 for a, b in zip(window, consurf_seq) if a != b)
+            for j in range(len(seq_b) - window + 1):
+                compare = seq_b[j : j + window]
 
-        if mismatch < best_mismatch:
-            best_mismatch = mismatch
-            best_start = i
+                mismatch = sum(a != b for a, b in zip(anchor, compare))
 
-    if best_start is None:
-        raise ValueError("Unable to locate ConSurf region")
+                if mismatch <= max_mismatch:
+                    candidate = (i, j, mismatch, label)
 
-    return best_start, best_mismatch
+                    if best is None or mismatch < best[2]:
+                        best = candidate
+
+    # A in B
+    scan(ref_seq, consurf_seq, "ref_in_consurf")
+
+    # B in A
+    scan(consurf_seq, ref_seq, "consurf_in_ref")
+
+    if best is None:
+        raise ValueError("No reliable local mapping found")
+
+    ref_i, consurf_i, mismatch, label = best  # type: ignore
+
+    if label == "ref_in_consurf":
+        ref_start = ref_i
+        consurf_start = consurf_i
+    else:
+        ref_start = consurf_i
+        consurf_start = ref_i
+
+    return ref_start, consurf_start, mismatch
 
 
-def _integrate_consurf_with_start(
+def _integrate_consurf(
     base_table: pd.DataFrame,
     consurf_df: pd.DataFrame,
-    start_index: int,
+    ref_start: int,
+    consurf_start: int,
 ) -> pd.DataFrame:
-    """
-    Write evolutionary conservation scores into full-length table
-    and move the column to the 4th position.
-    """
-
     out = base_table.copy()
 
     col_name = "Evolutionary conservation"
-
-    # create column
     out[col_name] = pd.NA
 
-    # fill values
     for _, row in consurf_df.iterrows():
-        consurf_pos = int(row["pos"])  # 1-based
+        consurf_pos = int(row["pos"]) - 1
         score = row["score"]
 
-        full_pos = start_index + consurf_pos
+        ref_pos = ref_start + (consurf_pos - consurf_start) + 1
 
-        out.loc[out["Position"] == full_pos, col_name] = score
+        if 1 <= ref_pos <= len(out):
+            out.loc[out["Position"] == ref_pos, col_name] = score
 
-    # move column to 4th position
+    # move to 4th column
     cols = out.columns.tolist()
-
     cols.remove(col_name)
-    cols.insert(3, col_name)  # index 3 = 4th column
-
+    cols.insert(3, col_name)
     out = out[cols]
 
     return out
 
 
 def _find_consurf_grades_file(consurf_dir: str, query_id: str) -> str:
-    parts = query_id.split("_")
-    uniprot_id = parts[0]
+    uniprot = query_id.split("_")[0]
 
-    variant_pattern = os.path.join(
-        consurf_dir,
+    patterns = [
         f"{query_id}_*_consurf_grades.txt",
-    )
-    matches = glob(variant_pattern)
-    if matches:
-        return sorted(matches)[0]
+        f"{uniprot}_*_consurf_grades.txt",
+    ]
 
-    wt_pattern = os.path.join(
-        consurf_dir,
-        f"{uniprot_id}_*_consurf_grades.txt",
-    )
-    matches = glob(wt_pattern)
-    if matches:
-        return sorted(matches)[0]
+    for p in patterns:
+        matches = glob(os.path.join(consurf_dir, p))
+        if matches:
+            return sorted(matches)[0]
 
-    raise FileNotFoundError(f"No ConSurf grades file for {query_id}")
+    raise FileNotFoundError(f"No ConSurf grades file found for {query_id}")
 
 
 # ============================== Main Stage ==============================
@@ -229,7 +221,6 @@ def run_consurf_integrate(**kwargs):
 
     grades_dir = os.path.join(consurf_root, "consurf")  # type: ignore
     output_dir = os.path.join(consurf_root, "reconstruct")  # type: ignore
-
     os.makedirs(output_dir, exist_ok=True)
 
     original_seqs = _load_original_sequences(fasta_path)  # type: ignore
@@ -252,25 +243,32 @@ def run_consurf_integrate(**kwargs):
             consurf_df = _parse_consurf_grades(consurf_path)
 
             ref_seq = original_seqs[query_id]
-
             mut_pos, mut_from, _ = _parse_mutation(query_id)
             restored_seq = _restore_reference_sequence(ref_seq, mut_pos, mut_from)
 
             consurf_seq = _build_consurf_sequence(consurf_df)
 
-            start_index, mismatch = _find_consurf_start(restored_seq, consurf_seq)
-
-            merged = _integrate_consurf_with_start(
-                base_table,
-                consurf_df,
-                start_index,
+            ref_start, consurf_start, mismatch = _find_best_local_mapping(
+                restored_seq,
+                consurf_seq,
             )
 
-            out_path = os.path.join(output_dir, f"{query_id}.tsv")
-            merged.to_csv(out_path, sep="\t", index=False)
+            merged = _integrate_consurf(
+                base_table,
+                consurf_df,
+                ref_start,
+                consurf_start,
+            )
+
+            merged.to_csv(
+                os.path.join(output_dir, f"{query_id}.tsv"),
+                sep="\t",
+                index=False,
+            )
 
             print(
-                f"   ✅ ConSurf start = {start_index + 1} " f"(mismatch={mismatch})\n"
+                f"   ✅ mapped (ref_start={ref_start+1}, "
+                f"consurf_start={consurf_start+1}, mismatch={mismatch})\n"
             )
             success += 1
 
