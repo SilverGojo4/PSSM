@@ -326,6 +326,7 @@ bash scripts/conservation_filter.sh <PROJECT_DIR> <CONS_MIN> <CONS_MAX> <EC_MIN>
 bash scripts/cdsearch.sh <PROJECT_DIR> [/path/to/input.fasta]
 bash scripts/pssm.sh <PROJECT_DIR> [/path/to/input.fasta]
 bash scripts/conservation.sh <PROJECT_DIR> [/path/to/input.fasta]
+bash scripts/conservation_filter.sh <PROJECT_DIR> <CONS_MIN> <CONS_MAX> <EC_MIN> <EC_MAX>
 ```
 
 **Data Flow:**
