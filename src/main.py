@@ -218,28 +218,24 @@ def main():
     parser.add_argument(
         "--ec_min",
         type=float,
-        required=True,
         help="Lower bound of evolutionary conservation score",
     )
 
     parser.add_argument(
         "--ec_max",
         type=float,
-        required=True,
         help="Upper bound of evolutionary conservation score",
     )
 
     parser.add_argument(
         "--cons_min",
         type=float,
-        required=True,
         help="Lower bound of domain conservation score",
     )
 
     parser.add_argument(
         "--cons_max",
         type=float,
-        required=True,
         help="Upper bound of domain conservation score",
     )
 

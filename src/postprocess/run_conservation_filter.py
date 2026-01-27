@@ -95,7 +95,9 @@ def run_conservation_filter(**kwargs):
 
     for i, path in enumerate(files):
         query_id = os.path.basename(path).replace(".tsv", "")
+        print("─" * 70)
         print(f"▶️  [{i+1}/{total}] {query_id}")
+        print("─" * 70)
 
         try:
             df = pd.read_csv(path, sep="\t")
