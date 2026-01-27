@@ -42,6 +42,10 @@ SUPPORTED_STAGES = {
         "title": "Integrate ConSurf residue-level conservation scores",
         "import_path": "src.preprocess.run_consurf_integrate.run_consurf_integrate",
     },
+    "conservation_filter": {
+        "title": "Mask PSSM features by conservation thresholds",
+        "import_path": "src.postprocess.run_conservation_filter.run_conservation_filter",
+    },
 }
 
 
@@ -208,6 +212,35 @@ def main():
         "--conservation_reconstruct_dir",
         type=str,
         help="Directory containing reconstructed conservation tables (Scorecons output).",
+    )
+
+    # -------------------- Conservation Filtering Args --------------------
+    parser.add_argument(
+        "--ec_min",
+        type=float,
+        required=True,
+        help="Lower bound of evolutionary conservation score",
+    )
+
+    parser.add_argument(
+        "--ec_max",
+        type=float,
+        required=True,
+        help="Upper bound of evolutionary conservation score",
+    )
+
+    parser.add_argument(
+        "--cons_min",
+        type=float,
+        required=True,
+        help="Lower bound of domain conservation score",
+    )
+
+    parser.add_argument(
+        "--cons_max",
+        type=float,
+        required=True,
+        help="Upper bound of domain conservation score",
     )
 
     # -------------------- Parse & Dispatch --------------------
