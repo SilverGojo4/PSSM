@@ -1,8 +1,18 @@
+# src/preprocess/run_consurf_integrate.py
 """
 ConSurf Conservation Integration Stage
 
 Integrate residue-level ConSurf conservation scores into
-successfully reconstructed full-length conservation tables.
+integrated full-length PSSM tables.
+
+Updated Design (Branch-aware Integrated Output)
+-----------------------------------------------
+This stage no longer reads/writes separate conservation/reconstruct folders.
+
+Instead:
+- Input: integrated tables from results/pssm/integrated/<branch>/
+- Input: raw ConSurf grades files from results/consurf/
+- Output: updated integrated tables (same directory)
 
 Design principles
 -----------------
@@ -19,24 +29,89 @@ import time
 from glob import glob
 
 # ============================== Third-Party Imports ==============================
+import numpy as np
 import pandas as pd
 from Bio import SeqIO
+
+# ============================== Constants ==============================
+AA_ORDER = list("GAILVMFWPCSTYNQHKRDE")
+PSSM_NUMERIC_COLS = AA_ORDER + ["Po", "Hy", "Ch", "Hy+Ch-Po", "|Hy-Ch|"]
 
 
 # ============================== Helper Functions ==============================
 def _load_original_sequences(fasta_path: str) -> dict:
+    """
+    Load original sequences from FASTA.
+
+    Returns
+    -------
+    dict
+        {seq_id: sequence_string}
+    """
     if not os.path.exists(fasta_path):
         raise FileNotFoundError(f"Input FASTA not found: {fasta_path}")
+
     return {rec.id: str(rec.seq) for rec in SeqIO.parse(fasta_path, "fasta")}
 
 
-def _load_base_reconstruct_table(path: str) -> pd.DataFrame:
+def _restore_numeric_types(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
+    """
+    Restore numeric dtypes:
+    - If a column contains only integer-like values (or NA), cast to Int64
+    - Otherwise keep float
+
+    Notes
+    -----
+    Pandas will often upcast integer columns to float when NA exists.
+    This helper restores stable dtypes to avoid integer -> float drift.
+    """
+    for c in cols:
+        if c not in df.columns:
+            continue
+
+        series = pd.to_numeric(df[c], errors="coerce")
+
+        if series.isna().all():
+            continue
+
+        non_na = series.dropna()
+
+        # safer integer-like check (avoid float precision issues)
+        if np.isclose(non_na, non_na.round()).all():
+            df[c] = series.round().astype("Int64")
+        else:
+            df[c] = series.astype(float)
+
+    return df
+
+
+def _load_base_integrated_table(path: str) -> pd.DataFrame:
+    """
+    Load integrated TSV table (PSSM + Scorecons).
+
+    Important
+    ---------
+    We must restore numeric dtypes after loading.
+    Otherwise integer PSSM matrices will be auto-cast to float when NA exists.
+    """
     if not os.path.exists(path):
-        raise FileNotFoundError(f"Reconstruct table not found: {path}")
-    return pd.read_csv(path, sep="\t")
+        raise FileNotFoundError(f"Integrated table not found: {path}")
+
+    df = pd.read_csv(path, sep="\t")
+    df = _restore_numeric_types(df, PSSM_NUMERIC_COLS)
+
+    return df
 
 
 def _parse_consurf_grades(path: str) -> pd.DataFrame:
+    """
+    Parse ConSurf grades file.
+
+    Returns
+    -------
+    DataFrame with columns:
+        pos, aa, score
+    """
     records = []
 
     with open(path) as f:
@@ -82,10 +157,19 @@ def _parse_consurf_grades(path: str) -> pd.DataFrame:
 
 
 def _build_consurf_sequence(consurf_df: pd.DataFrame) -> str:
+    """
+    Build AA sequence string from ConSurf parsed table.
+    """
     return "".join(consurf_df.sort_values("pos")["aa"].tolist())
 
 
 def _parse_mutation(query_id: str):
+    """
+    Parse mutation info from query_id if present.
+
+    Expected format:
+        UniProt_A123B
+    """
     try:
         mut = query_id.split("_")[1]
         from_aa = mut[0]
@@ -97,12 +181,18 @@ def _parse_mutation(query_id: str):
 
 
 def _restore_reference_sequence(seq: str, mut_pos, mut_from):
+    """
+    Restore original residue in mutated sequence if mutation exists.
+
+    ConSurf grades are often computed on the reference sequence.
+    """
     if mut_pos is None:
         return seq
 
     idx = mut_pos - 1
     if 0 <= idx < len(seq):
         return seq[:idx] + mut_from + seq[idx + 1 :]
+
     return seq
 
 
@@ -116,12 +206,15 @@ def _find_best_local_mapping(
     """
     Find best local matching region between two sequences.
 
-    Returns:
-        ref_start (0-based)
-        consurf_start (0-based)
-        mismatch
+    Returns
+    -------
+    ref_start : int
+        0-based start index in ref_seq
+    consurf_start : int
+        0-based start index in consurf_seq
+    mismatch : int
+        mismatch count in best window
     """
-
     best = None
 
     def scan(seq_a, seq_b, label):
@@ -141,10 +234,7 @@ def _find_best_local_mapping(
                     if best is None or mismatch < best[2]:
                         best = candidate
 
-    # A in B
     scan(ref_seq, consurf_seq, "ref_in_consurf")
-
-    # B in A
     scan(consurf_seq, ref_seq, "consurf_in_ref")
 
     if best is None:
@@ -168,9 +258,17 @@ def _integrate_consurf(
     ref_start: int,
     consurf_start: int,
 ) -> pd.DataFrame:
+    """
+    Integrate ConSurf scores into integrated table.
+
+    Adds / overwrites column:
+        Evolutionary conservation
+    """
     out = base_table.copy()
 
     col_name = "Evolutionary conservation"
+
+    # Always overwrite if rerun
     out[col_name] = pd.NA
 
     for _, row in consurf_df.iterrows():
@@ -192,6 +290,17 @@ def _integrate_consurf(
 
 
 def _find_consurf_grades_file(consurf_dir: str, query_id: str) -> str:
+    """
+    Find ConSurf grades file for query_id.
+
+    Search priority:
+    - query_id-based
+    - UniProt-based
+
+    Example patterns:
+        {query_id}_*_consurf_grades.txt
+        {uniprot}_*_consurf_grades.txt
+    """
     uniprot = query_id.split("_")[0]
 
     patterns = [
@@ -208,38 +317,72 @@ def _find_consurf_grades_file(consurf_dir: str, query_id: str) -> str:
 
 
 # ============================== Main Stage ==============================
-def run_consurf_integrate(**kwargs):
+def run_consurf_integrate(**kwargs) -> None:
+    """
+    Stage: integrate ConSurf evolutionary conservation scores into integrated PSSM tables.
+
+    Required Args
+    -------------
+    pssm_fasta_path
+    pssm_integrated_dir
+    consurf_dir
+    """
     start = time.time()
 
     print("\n╔══════════════════════════════════════════════════════════════════════╗")
     print("║          [ ConSurf Conservation Integration Stage Started ]          ║")
     print("╚══════════════════════════════════════════════════════════════════════╝\n")
 
-    fasta_path = kwargs.get("conservation_fasta_path")
-    reconstruct_dir = kwargs.get("conservation_reconstruct_dir")
-    consurf_root = kwargs.get("conservation_dir")
+    fasta_path = kwargs.get("pssm_fasta_path")
+    integrated_dir = kwargs.get("pssm_integrated_dir")
+    consurf_dir = kwargs.get("consurf_dir")
 
-    grades_dir = os.path.join(consurf_root, "consurf")  # type: ignore
-    output_dir = os.path.join(consurf_root, "reconstruct")  # type: ignore
-    os.makedirs(output_dir, exist_ok=True)
+    if not fasta_path:
+        raise ValueError("pssm_fasta_path must be provided")
+    if not integrated_dir:
+        raise ValueError("pssm_integrated_dir must be provided")
+    if not consurf_dir:
+        raise ValueError("consurf_dir must be provided")
 
-    original_seqs = _load_original_sequences(fasta_path)  # type: ignore
-    reconstruct_files = sorted(glob(os.path.join(reconstruct_dir, "*.tsv")))  # type: ignore
+    if not os.path.exists(integrated_dir):
+        raise FileNotFoundError(f"Integrated directory not found: {integrated_dir}")
+    if not os.path.exists(consurf_dir):
+        raise FileNotFoundError(f"ConSurf directory not found: {consurf_dir}")
 
-    total = len(reconstruct_files)
+    log_path = os.path.join(integrated_dir, "consurf_integrate_error.log")
+
+    print(f"📂 FASTA Path           : {fasta_path}")
+    print(f"📁 Integrated Dir       : {integrated_dir}")
+    print(f"📁 ConSurf Dir          : {consurf_dir}")
+    print(f"🐛 Error Log            : {log_path}\n")
+
+    original_seqs = _load_original_sequences(fasta_path)
+
+    integrated_files = sorted(glob(os.path.join(integrated_dir, "*.tsv")))
+    integrated_files = [p for p in integrated_files if not p.endswith("_metadata.tsv")]
+
+    total = len(integrated_files)
+
+    if total == 0:
+        raise ValueError(f"No integrated TSV files found in: {integrated_dir}")
+
     success = 0
     failed = 0
 
-    for idx, path in enumerate(reconstruct_files):
+    for idx, path in enumerate(integrated_files):
         query_id = os.path.basename(path).replace(".tsv", "")
+        progress = (idx + 1) / total * 100
 
         print("─" * 70)
-        print(f"▶️  [{idx+1}/{total}]  {query_id}")
+        print(f"▶️  [{idx+1:3d}/{total:<3d} | {progress:5.1f}% ]  {query_id}")
         print("─" * 70)
 
         try:
-            base_table = _load_base_reconstruct_table(path)
-            consurf_path = _find_consurf_grades_file(grades_dir, query_id)
+            if query_id not in original_seqs:
+                raise KeyError(f"Query sequence not found in FASTA: {query_id}")
+
+            base_table = _load_base_integrated_table(path)
+            consurf_path = _find_consurf_grades_file(consurf_dir, query_id)
             consurf_df = _parse_consurf_grades(consurf_path)
 
             ref_seq = original_seqs[query_id]
@@ -260,21 +403,23 @@ def run_consurf_integrate(**kwargs):
                 consurf_start,
             )
 
-            merged.to_csv(
-                os.path.join(output_dir, f"{query_id}.tsv"),
-                sep="\t",
-                index=False,
-            )
+            merged = _restore_numeric_types(merged, PSSM_NUMERIC_COLS)
+            merged.to_csv(path, sep="\t", index=False)
 
             print(
                 f"   ✅ mapped (ref_start={ref_start+1}, "
-                f"consurf_start={consurf_start+1}, mismatch={mismatch})\n"
+                f"consurf_start={consurf_start+1}, mismatch={mismatch})"
             )
+            print(f"   🧬 integrated -> {path}\n")
+
             success += 1
 
         except Exception as e:
-            print(f"   ❌ Failed: {e}\n")
             failed += 1
+            print(f"   ❌ Failed: {e}\n")
+
+            with open(log_path, "a") as log:
+                log.write(f"[{query_id}] {e}\n")
 
     elapsed = time.time() - start
 
@@ -284,5 +429,6 @@ def run_consurf_integrate(**kwargs):
     print(f"Total       : {total}")
     print(f"Successful  : {success}")
     print(f"Failed      : {failed}")
+    print(f"🐛 Error log: {log_path}")
     print(f"Elapsed     : {elapsed:.2f} sec")
     print("══════════════════════════════════════════════════════════════════════\n")

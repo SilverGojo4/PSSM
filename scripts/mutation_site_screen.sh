@@ -4,21 +4,20 @@ set -e
 # ======================================================
 # Usage check
 # ======================================================
-if [ $# -lt 5 ]; then
+if [ $# -lt 4 ]; then
   echo ""
   echo "Usage:"
-  echo "  $0 <PROJECT_DIR> <EC_MIN> <EC_MAX> <CONS_MIN> <CONS_MAX> [BRANCH]"
+  echo "  $0 <PROJECT_DIR> <HYCHPO_MAX> <ABS_HYCH_MAX> <KNOWN_MUTATION_TSV> [BRANCH]"
   echo ""
   echo "Arguments:"
-  echo "  PROJECT_DIR   Root directory of the project"
-  echo "  EC_MIN        Lower bound for evolutionary conservation"
-  echo "  EC_MAX        Upper bound for evolutionary conservation"
-  echo "  CONS_MIN      Lower bound for Scorecons conservation"
-  echo "  CONS_MAX      Upper bound for Scorecons conservation"
-  echo "  BRANCH        Optional: psiblast | smp | all (default: all)"
+  echo "  PROJECT_DIR          Root directory of the project"
+  echo "  HYCHPO_MAX           Max threshold for Hy+Ch-Po (grid search 1~X)"
+  echo "  ABS_HYCH_MAX         Max threshold for |Hy-Ch| (grid search 1~Y)"
+  echo "  KNOWN_MUTATION_TSV   Ground truth mutation site TSV"
+  echo "  BRANCH               Optional: psiblast | smp | all (default: all)"
   echo ""
   echo "Example:"
-  echo "  $0 ~/PSSM 0.15 0.75 -1 1 all"
+  echo "  $0 ~/PSSM 10 6 data/known_mutation_sites.tsv all"
   echo ""
   exit 1
 fi
@@ -27,11 +26,10 @@ fi
 # Input arguments
 # ======================================================
 PROJECT_DIR=$1
-EC_MIN=$2
-EC_MAX=$3
-CONS_MIN=$4
-CONS_MAX=$5
-BRANCH=${6:-all}
+HYCHPO_MAX=$2
+ABS_HYCH_MAX=$3
+KNOWN_MUTATION_TSV=$4
+BRANCH=${5:-all}
 
 # ======================================================
 # Validate branch
@@ -43,6 +41,20 @@ if [[ "$BRANCH" != "psiblast" && "$BRANCH" != "smp" && "$BRANCH" != "all" ]]; th
 fi
 
 # ======================================================
+# Validate known mutation file
+# ======================================================
+if [ ! -f "$KNOWN_MUTATION_TSV" ]; then
+  echo "Error: known mutation TSV not found:"
+  echo "  $KNOWN_MUTATION_TSV"
+  echo ""
+  echo "The TSV file must contain columns:"
+  echo "  ID"
+  echo "  Known Mutation Sites"
+  echo ""
+  exit 1
+fi
+
+# ======================================================
 # Conda environment
 # ======================================================
 CONDA_BASE=$(conda info --base)
@@ -50,49 +62,45 @@ source "$CONDA_BASE/etc/profile.d/conda.sh"
 conda activate pssm
 
 # ======================================================
-# Branch loop
+# Branch runner
 # ======================================================
-run_branch_filter() {
+run_branch_screen() {
   local branch_name=$1
 
-  local integrated_dir="$PROJECT_DIR/results/pssm/integrated/$branch_name"
-  local filtered_dir="$PROJECT_DIR/results/pssm/filtered/$branch_name"
+  local input_dir="$PROJECT_DIR/results/pssm/filtered/$branch_name"
 
   echo ""
   echo "======================================================"
-  echo " Running Conservation Filtering Stage"
+  echo " Running Mutation Site Screening (Grid Search)"
   echo " Branch: $branch_name"
-  echo " Input : $integrated_dir"
-  echo " Output: $filtered_dir"
+  echo " Input : $input_dir"
   echo "======================================================"
   echo ""
 
-  if [ ! -d "$integrated_dir" ]; then
-    echo "Error: Integrated directory not found:"
-    echo "  $integrated_dir"
+  if [ ! -d "$input_dir" ]; then
+    echo "Error: Filtered directory not found:"
+    echo "  $input_dir"
     echo ""
-    echo "Please run scripts/conservation.sh first."
+    echo "Please run scripts/conservation_filter.sh first."
     exit 1
   fi
 
   python "$PROJECT_DIR/src/main.py" \
-    --stage conservation_filter \
-    --pssm_integrated_dir "$integrated_dir" \
-    --pssm_filtered_output_dir "$filtered_dir" \
-    --ec_min "$EC_MIN" \
-    --ec_max "$EC_MAX" \
-    --cons_min "$CONS_MIN" \
-    --cons_max "$CONS_MAX"
+    --stage mutation_site_screen \
+    --branch "$branch_name" \
+    --hychpo_max "$HYCHPO_MAX" \
+    --abs_hych_max "$ABS_HYCH_MAX" \
+    --known_mutation_sites_tsv "$KNOWN_MUTATION_TSV"
 }
 
 # ======================================================
 # Run requested branch(es)
 # ======================================================
 if [ "$BRANCH" == "all" ]; then
-  run_branch_filter "psiblast"
-  run_branch_filter "smp"
+  run_branch_screen "psiblast"
+  run_branch_screen "smp"
 else
-  run_branch_filter "$BRANCH"
+  run_branch_screen "$BRANCH"
 fi
 
 # ======================================================
@@ -101,5 +109,5 @@ fi
 conda deactivate
 
 echo ""
-echo "✅ Conservation filtering finished."
+echo "✅ Mutation site screening finished."
 echo ""

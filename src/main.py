@@ -34,17 +34,25 @@ SUPPORTED_STAGES = {
         "title": "Reconstruct full-length Lx20 PSSM matrix using alignment",
         "import_path": "src.preprocess.run_pssm_reconstruct.run_pssm_reconstruct",
     },
+    "smp_parse": {
+        "title": "Extract domain-level PSSM matrices directly from CDD .smp profiles",
+        "import_path": "src.preprocess.run_smp_parse.run_smp_parse",
+    },
     "scorecons_reconstruct": {
-        "title": "Reconstruct full-length conservation scores using Scorecons alignment",
+        "title": "Integrate Scorecons conservation into integrated PSSM tables",
         "import_path": "src.preprocess.run_scorecons_integrate.run_scorecons_reconstruct",
     },
     "consurf_integrate": {
-        "title": "Integrate ConSurf residue-level conservation scores",
+        "title": "Integrate ConSurf evolutionary conservation into integrated PSSM tables",
         "import_path": "src.preprocess.run_consurf_integrate.run_consurf_integrate",
     },
     "conservation_filter": {
         "title": "Mask PSSM features by conservation thresholds",
         "import_path": "src.postprocess.run_conservation_filter.run_conservation_filter",
+    },
+    "mutation_site_screen": {
+        "title": "Screen mutation candidate sites using PSSM thresholds",
+        "import_path": "src.postprocess.run_mutation_site_screen.run_mutation_site_screen",
     },
 }
 
@@ -64,15 +72,14 @@ def dispatch_stage(args: argparse.Namespace) -> None:
         available = ", ".join(SUPPORTED_STAGES.keys())
         raise ValueError(f"Unknown stage '{stage}'. Available stages: {available}.")
 
-    # Dynamic import for the selected stage
     stage_info = SUPPORTED_STAGES[stage]
     module_path, func_name = stage_info["import_path"].rsplit(".", 1)
     module = importlib.import_module(module_path)
     stage_func = getattr(module, func_name)
 
-    # Execute stage
     extra_args = vars(args)
     extra_args.pop("stage", None)
+
     stage_func(base_path=BASE_PATH, **extra_args)
 
 
@@ -83,7 +90,7 @@ def main():
     Parses CLI arguments and routes execution to the selected pipeline stage.
     """
     available_stage_lines = [
-        f"  - {stage:<15} {info['title']}" for stage, info in SUPPORTED_STAGES.items()
+        f"  - {stage:<20} {info['title']}" for stage, info in SUPPORTED_STAGES.items()
     ]
     available_stages_text = "\n".join(available_stage_lines)
     example_stage = list(SUPPORTED_STAGES.keys())[0]
@@ -111,6 +118,20 @@ def main():
         + ", ".join(SUPPORTED_STAGES.keys()),
     )
 
+    parser.add_argument(
+        "--branch",
+        type=str,
+        choices=["psiblast", "smp", "all"],
+        default="all",
+        help=(
+            "Which PSSM branch to run (used in integrated stages).\n"
+            "Options:\n"
+            "  psiblast : Branch A (PSI-BLAST)\n"
+            "  smp      : Branch B (.smp parsing)\n"
+            "  all      : Run both branches (default)"
+        ),
+    )
+
     # -------------------- CD-Search Args --------------------
     parser.add_argument(
         "--cdsearch_input_fasta",
@@ -127,29 +148,36 @@ def main():
         type=str,
         help="Path to local CDD BLAST database (used for both CD-Search and PSI-BLAST).",
     )
-    parser.add_argument(
-        "--cdsearch_cddid_tbl",
-        type=str,
-        help="Path to cddid_all.tbl mapping file for CDD PSSM IDs.",
-    )
 
     # -------------------- Domain PSI-BLAST Args --------------------
     parser.add_argument(
         "--domain_fasta_dir",
         type=str,
-        default=os.path.join(BASE_PATH, "results", "cdsearch_results", "domains_fasta"),
+        default=os.path.join(
+            BASE_PATH,
+            "results",
+            "cdsearch",
+            "domains_fasta",
+            "hseq_with_gap",
+        ),
         help="Directory containing extracted domain FASTA files from CD-Search.",
     )
     parser.add_argument(
         "--psiblast_output_dir",
         type=str,
-        default=os.path.join(BASE_PATH, "results", "domain_psiblast"),
+        default=os.path.join(
+            BASE_PATH,
+            "results",
+            "pssm",
+            "profiles",
+            "psiblast",
+        ),
         help="Output directory for domain-level PSI-BLAST results.",
     )
     parser.add_argument(
         "--psiblast_blast_db",
         type=str,
-        default=os.path.join(BASE_PATH, "blastdb", "cdd"),
+        default=os.path.join(BASE_PATH, "blastdb", "cdd", "Cdd"),
         help="Protein BLAST database path for PSI-BLAST.",
     )
     parser.add_argument(
@@ -164,10 +192,21 @@ def main():
         "--pssm_root_dir",
         type=str,
         help=(
-            "Root directory for domain-level PSI-BLAST results "
-            "(e.g., results/domain_psiblast). "
-            "This directory must contain pssm_profiles/."
+            "Legacy root directory for PSI-BLAST results "
+            "(contains pssm_profiles/ and pssm_matrices/)."
         ),
+    )
+
+    parser.add_argument(
+        "--pssm_profiles_dir",
+        type=str,
+        help="Directory containing .pssm profiles (input for PSSM matrix extraction).",
+    )
+
+    parser.add_argument(
+        "--pssm_matrix_output_dir",
+        type=str,
+        help="Output directory for extracted PSSM matrices (*.tsv).",
     )
 
     # -------------------- PSSM Reconstruction Args --------------------
@@ -183,35 +222,60 @@ def main():
         help="CD-Search result table: cdsearch_top_hits_detailed.tsv",
     )
 
-    # -------------------- Conservation Reconstruction Args --------------------
     parser.add_argument(
-        "--conservation_fasta_path",
+        "--pssm_matrix_dir",
         type=str,
-        help="Original input FASTA (full-length sequences).",
+        help="Directory containing extracted domain-level PSSM matrices (*.tsv).",
     )
 
     parser.add_argument(
-        "--conservation_cdsearch_table",
+        "--pssm_reconstruct_output_dir",
         type=str,
-        help="CD-Search result table: cdsearch_top_hits_detailed.tsv",
+        help="Output directory for reconstructed full-length PSSM tables (*.tsv).",
+    )
+
+    # -------------------- SMP Parsing Args (Branch B) --------------------
+    parser.add_argument(
+        "--smp_cdsearch_table",
+        type=str,
+        help="CD-Search result table used to resolve PSSM_ID for SMP parsing.",
     )
 
     parser.add_argument(
-        "--pssm_reconstruct_dir",
+        "--smp_root_dir",
         type=str,
-        help="Directory containing reconstructed full-length PSSM tables.",
+        help="Root directory containing CDD .smp files (e.g., blastdb/cdd or blastdb/cdd/smps).",
     )
 
     parser.add_argument(
-        "--conservation_dir",
+        "--smp_matrix_output_dir",
         type=str,
-        help="Directory containing Scorecons server results (*.txt).",
+        help="Output directory for SMP-derived PSSM matrices (*.tsv).",
+    )
+
+    # -------------------- Integrated Conservation Stages Args --------------------
+    parser.add_argument(
+        "--scorecons_dir",
+        type=str,
+        help="Directory containing Scorecons output files (*.txt). (e.g., results/scorecons)",
     )
 
     parser.add_argument(
-        "--conservation_reconstruct_dir",
+        "--consurf_dir",
         type=str,
-        help="Directory containing reconstructed conservation tables (Scorecons output).",
+        help="Directory containing ConSurf grades files (*_consurf_grades.txt). (e.g., results/consurf)",
+    )
+
+    parser.add_argument(
+        "--pssm_integrated_output_dir",
+        type=str,
+        help="Output directory for integrated tables (Scorecons stage writes here).",
+    )
+
+    parser.add_argument(
+        "--pssm_integrated_dir",
+        type=str,
+        help="Directory containing integrated tables (ConSurf stage reads/writes here).",
     )
 
     # -------------------- Conservation Filtering Args --------------------
@@ -237,6 +301,38 @@ def main():
         "--cons_max",
         type=float,
         help="Upper bound of domain conservation score",
+    )
+
+    parser.add_argument(
+        "--pssm_filtered_output_dir",
+        type=str,
+        help="Output root directory for conservation-filtered TSV files (default: results/pssm/filtered).",
+    )
+
+    # -------------------- Backward Compatibility (Legacy Args) --------------------
+    parser.add_argument(
+        "--conservation_reconstruct_dir",
+        type=str,
+        help="(Legacy) reconstruct directory containing integrated TSV files.",
+    )
+
+    # -------------------- Mutation Site Screening Args (Grid Version) --------------------
+    parser.add_argument(
+        "--hychpo_max",
+        type=int,
+        help="Maximum threshold for Hy+Ch-Po (grid search from 1 to this value).",
+    )
+
+    parser.add_argument(
+        "--abs_hych_max",
+        type=int,
+        help="Maximum threshold for |Hy-Ch| (grid search from 1 to this value).",
+    )
+
+    parser.add_argument(
+        "--known_mutation_sites_tsv",
+        type=str,
+        help="TSV file containing ground truth mutation sites (columns: ID, Known Mutation Sites).",
     )
 
     # -------------------- Parse & Dispatch --------------------

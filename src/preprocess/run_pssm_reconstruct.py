@@ -5,17 +5,27 @@ Full-length PSSM Reconstruction Stage
 This stage projects domain-level PSSM matrices back to full-length protein
 coordinates using CD-Search alignment information.
 
-Directory layout (under pssm_root_dir):
+Updated Design (Branch-aware)
+-----------------------------
+This stage now supports decoupled input/output paths:
 
-domain_psiblast/
-├── pssm_matrices/        # input (domain-level)
-├── pssm_reconstruct/     # output (full-length)
-└── pssm_reconstruct_error.log
+Input:
+    --pssm_matrix_dir (directory containing domain-level *.tsv matrices)
+
+Output:
+    --pssm_reconstruct_output_dir (directory containing reconstructed *.tsv)
+
+Error Log:
+    <pssm_reconstruct_output_dir>/pssm_reconstruct_error.log
+
+Legacy Support:
+    --pssm_root_dir is still supported for backward compatibility.
 """
 
 # ============================== Standard Library Imports ==============================
 import os
 import time
+from typing import Optional, Tuple
 
 # ============================== Third-Party Imports ==============================
 import pandas as pd
@@ -40,10 +50,47 @@ def _load_original_sequences(fasta_path: str) -> dict:
     return {rec.id: str(rec.seq) for rec in SeqIO.parse(fasta_path, "fasta")}
 
 
+def _resolve_paths(
+    *,
+    pssm_root_dir: Optional[str],
+    pssm_matrix_dir: Optional[str],
+    pssm_reconstruct_output_dir: Optional[str],
+) -> Tuple[str, str]:
+    """
+    Resolve matrix input dir and reconstruction output dir.
+
+    Priority:
+    - New interface: pssm_matrix_dir + pssm_reconstruct_output_dir
+    - Legacy interface: pssm_root_dir/pssm_matrices + pssm_root_dir/pssm_reconstruct
+    """
+    if pssm_matrix_dir and pssm_reconstruct_output_dir:
+        return pssm_matrix_dir, pssm_reconstruct_output_dir
+
+    if pssm_root_dir:
+        matrix_dir = os.path.join(pssm_root_dir, "pssm_matrices")
+        out_dir = os.path.join(pssm_root_dir, "pssm_reconstruct")
+        return matrix_dir, out_dir
+
+    raise ValueError(
+        "Must provide either:\n"
+        "  (1) pssm_matrix_dir + pssm_reconstruct_output_dir\n"
+        "or\n"
+        "  (2) pssm_root_dir (legacy mode)"
+    )
+
+
 def _load_domain_pssm_matrix(
     matrix_dir: str, query_id: str, pssm_id: int
 ) -> pd.DataFrame:
-    """Load domain-level PSSM matrix."""
+    """
+    Load domain-level PSSM matrix.
+
+    Expected file naming convention:
+        {query_id}_{pssm_id}_hseq_with_gap.tsv
+
+    Example:
+        P00001_231391_hseq_with_gap.tsv
+    """
     fname = f"{query_id}_{pssm_id}_hseq_with_gap.tsv"
     fpath = os.path.join(matrix_dir, fname)
 
@@ -63,8 +110,8 @@ def _reconstruct_full_pssm(
     -----
     - Only aligned residues receive PSSM values
     - Unaligned positions remain NaN
+    - Output uses UniProt absolute coordinate system (1..L)
     """
-
     L = len(original_seq)
 
     columns = (
@@ -82,7 +129,7 @@ def _reconstruct_full_pssm(
     qseq = aln_row["qseq"]
     hseq = aln_row["hseq"]
 
-    orig_pos = aln_row["qstart"]
+    orig_pos = int(aln_row["qstart"])
     pssm_row_index = 0
 
     for q_char, h_char in zip(qseq, hseq):
@@ -93,14 +140,10 @@ def _reconstruct_full_pssm(
             if pssm_row_index < len(domain_pssm):
                 row = domain_pssm.iloc[pssm_row_index]
 
-                numeric_values = []
-                for val in row[AA_ORDER + ["Po", "Hy", "Ch", "Hy+Ch-Po", "|Hy-Ch|"]]:
-                    try:
-                        numeric_values.append(int(float(val)))
-                    except Exception:
-                        numeric_values.append(val)
-
-                out.loc[orig_pos, columns[3:]] = numeric_values
+                values = row[
+                    AA_ORDER + ["Po", "Hy", "Ch", "Hy+Ch-Po", "|Hy-Ch|"]
+                ].values
+                out.loc[orig_pos, columns[3:]] = values
                 out.loc[orig_pos, "Alignment"] = "1 (aligned)"
 
             pssm_row_index += 1
@@ -119,6 +162,14 @@ def _reconstruct_full_pssm(
 def run_pssm_reconstruct(**kwargs):
     """
     Stage: reconstruct full-length PSSM matrices using alignment projection.
+
+    New Directory Layout (recommended):
+        input:  results/pssm/matrices/psiblast/*.tsv
+        output: results/pssm/reconstruct/psiblast/*.tsv
+
+    Legacy Layout (still supported):
+        input:  <pssm_root_dir>/pssm_matrices/*.tsv
+        output: <pssm_root_dir>/pssm_reconstruct/*.tsv
     """
     start = time.time()
 
@@ -126,28 +177,37 @@ def run_pssm_reconstruct(**kwargs):
     print("║              [ Full-length PSSM Reconstruction Stage Started ]       ║")
     print("╚══════════════════════════════════════════════════════════════════════╝\n")
 
-    pssm_root = kwargs.get("pssm_root_dir")
+    pssm_root_dir = kwargs.get("pssm_root_dir")
+
     fasta_path = kwargs.get("pssm_fasta_path")
     cdsearch_path = kwargs.get("pssm_cdsearch_table")
 
-    if not pssm_root:
-        raise ValueError("pssm_root_dir must be provided")
+    pssm_matrix_dir = kwargs.get("pssm_matrix_dir")
+    reconstruct_output_dir = kwargs.get("pssm_reconstruct_output_dir")
 
-    matrix_dir = os.path.join(pssm_root, "pssm_matrices")
-    output_dir = os.path.join(pssm_root, "pssm_reconstruct")
-    log_path = os.path.join(pssm_root, "pssm_reconstruct_error.log")
+    if not fasta_path:
+        raise ValueError("pssm_fasta_path must be provided")
+    if not cdsearch_path:
+        raise ValueError("pssm_cdsearch_table must be provided")
+
+    matrix_dir, output_dir = _resolve_paths(
+        pssm_root_dir=pssm_root_dir,
+        pssm_matrix_dir=pssm_matrix_dir,
+        pssm_reconstruct_output_dir=reconstruct_output_dir,
+    )
 
     os.makedirs(output_dir, exist_ok=True)
 
-    print(f"📁 PSI-BLAST Root Dir : {pssm_root}")
-    print(f"📂 PSSM Matrices     : {matrix_dir}")
-    print(f"📁 Reconstruct Out   : {output_dir}")
-    print(f"🐛 Error Log         : {log_path}")
-    print(f"📂 FASTA Path        : {fasta_path}")
-    print(f"📄 CD-Search Table   : {cdsearch_path}\n")
+    log_path = os.path.join(output_dir, "pssm_reconstruct_error.log")
 
-    aln_table = _load_alignment_table(cdsearch_path)  # type: ignore
-    original_seqs = _load_original_sequences(fasta_path)  # type: ignore
+    print(f"📂 PSSM Matrix Dir     : {matrix_dir}")
+    print(f"📁 Reconstruct Out Dir : {output_dir}")
+    print(f"🐛 Error Log           : {log_path}")
+    print(f"📂 FASTA Path          : {fasta_path}")
+    print(f"📄 CD-Search Table     : {cdsearch_path}\n")
+
+    aln_table = _load_alignment_table(cdsearch_path)
+    original_seqs = _load_original_sequences(fasta_path)
 
     total = len(aln_table)
     success, failed = 0, 0
@@ -167,8 +227,10 @@ def run_pssm_reconstruct(**kwargs):
         print("─" * 70)
 
         try:
-            domain_pssm = _load_domain_pssm_matrix(matrix_dir, query_id, pssm_id)
+            if query_id not in original_seqs:
+                raise KeyError(f"Query sequence not found in FASTA: {query_id}")
 
+            domain_pssm = _load_domain_pssm_matrix(matrix_dir, query_id, pssm_id)
             original_seq = original_seqs[query_id]
 
             full = _reconstruct_full_pssm(original_seq, row, domain_pssm)

@@ -2,38 +2,66 @@
 
 ![Pipeline Flowchart](docs/pssm_workflow.jpg)
 
+This repository implements a **branch-aware** protein residue feature pipeline based on:
+
+- **CDD CD-Search / RPS-BLAST** (domain detection)
+- **PSSM matrix reconstruction** (domain → full-length)
+- **Scorecons conservation** integration (external)
+- **ConSurf evolutionary conservation** integration (external)
+- **Conservation-based feature masking**
+
+A key design update of this project is that **two independent PSSM branches are supported**:
+
+- **Branch A (`psiblast`)**: PSI-BLAST generated `.pssm` profiles
+- **Branch B (`smp`)**: direct parsing of CDD `.smp` profile matrices
+
+Both branches are processed under the same unified folder layout and scripts.
+
 ## Project Structure
 
 ```
 PSSM/
 ├── src/
-│   ├── main.py                  # Unified pipeline entry point
-│   └── preprocess/
-│       ├── run_cdsearch.py
-│       ├── run_domain_psiblast.py
-│       ├── run_pssm_features
-│       ├── run_pssm_reconstruct.py
-│       └── run_conservation_reconstruct
+│   ├── main.py                        # Unified pipeline entry point
+│   ├── preprocess/
+│   │   ├── run_cdsearch.py
+│   │   ├── run_domain_psiblast.py
+│   │   ├── run_pssm_features.py
+│   │   ├── run_pssm_reconstruct.py
+│   │   ├── run_smp_parse.py
+│   │   ├── run_scorecons_integrate.py
+│   │   └── run_consurf_integrate.py
+│   │
+│   └── postprocess/
+│       ├── run_conservation_filter.py
+│       └── run_mutation_site_screen.py
 │
 ├── scripts/
-│   ├── setup_cdd.sh             # One-time setup for CDD RPS-BLAST DB
-│   ├── cdsearch.sh              # Run CD-Search alignment stage
-│   ├── pssm.sh                  # Run PSI-BLAST and PSSM feature extraction (Stage 2+3)
-│   └── conservation.sh          # Run conservation score reconstruction (Stage 4)
+│   ├── setup_cdd.sh                   # One-time setup for CDD RPS-BLAST DB
+│   ├── cdsearch.sh                    # Stage 1: CD-Search alignment
+│   ├── pssm.sh                        # Stage 2+3: PSI-BLAST PSSM build (Branch A)
+│   ├── conservation.sh                # Stage 4: Scorecons + ConSurf integration (branch-aware)
+│   └── conservation_filter.sh         # Stage 5: Conservation-based masking (branch-aware)
 │
-├── data/
-│   ├── raw/                     # Input protein lists
-│   └── processed/               # FASTA files and metadata
+├── results/
+│   ├── cdsearch/
+│   ├── pssm/
+│   │   ├── profiles/
+│   │   ├── matrices/
+│   │   ├── reconstruct/
+│   │   ├── integrated/
+│   │   └── filtered/
+│   ├── scorecons/                     # External Scorecons outputs (*.txt)
+│   └── consurf/                       # External ConSurf grades (*_consurf_grades.txt)
 │
-└── blastdb/
-│   ├── cdd/                     # RPS-BLAST CDD database
-│   └── cdd.tar                  # Archived CDD package
+├── blastdb/
+│   └── cdd/                           # Local CDD database + extracted .smp profiles
 │
 ├── env/
-│   └── pssm.yml                 # Conda environment definition
+│   └── pssm.yml                       # Conda environment definition
 │
-├── docs/
-│   └── workflow_diagram.jpg     # Full process flowchart (as reference)
+└── docs/
+    └── pssm_workflow.jpg              # Pipeline diagram
 ```
 
 ## Getting Started
@@ -45,34 +73,35 @@ conda env create -f env/pssm.yml
 conda activate pssm
 ```
 
-Environment includes `biopython`, `pandas`, and `blast+`.
+Environment includes `biopython`, `pandas`, and NCBI `blast+`.
 
-## One-Time: Setup CDD Database for RPS-BLAST
+## One-Time Setup: Install CDD Database (RPS-BLAST + .smp Profiles)
 
 ```bash
 bash scripts/setup_cdd.sh <PROJECT_DIR>
 ```
 
-This step extracts `.smp` profiles and builds the RPS-BLAST CDD database (`Cdd.pn`).
+This step prepares:
+
+- `blastdb/cdd/Cdd.*` (RPS-BLAST database)
+- extracted `.smp` profiles for Branch B parsing
 
 ## Input FASTA Requirements
 
 The pipeline requires a **protein FASTA file** as input.
-Each sequence must follow a standardized header naming convention to ensure correct
-tracking of wild-type and mutant proteins throughout the analysis.
+
+Each FASTA record must follow a strict naming rule so that
+wild-type and mutant sequences can be tracked consistently.
 
 ### FASTA Header Naming Rules
 
-Each FASTA record must use the following format:
-
-- **Wild-type sequence** : {UniProt_ID}
-- **Mutant sequence** : {UniProt_ID}\_{mutation}
+- **Wild-type sequence**: `{UniProt_ID}`
+- **Mutant sequence**: `{UniProt_ID}_{mutation}`
 
 Where:
 
-- `{UniProt_ID}` is the official UniProt accession ID
-- `{mutation}` follows standard mutation notation
-  (e.g., `A53L`, meaning Alanine at position 53 mutated to Leucine)
+- `{UniProt_ID}` is the UniProt accession ID
+- `{mutation}` follows standard notation (e.g., `A53L`)
 
 ### Examples
 
@@ -84,303 +113,352 @@ MSLGAKPFGEKKFIEIKGRRMAYIDEGTGDPILFQHGNPTSSYLWRNIMPHCAGLGRLIACDLIGMGDSDKLDPSGPERY
 MSLGAKPFGEKKFIEIKGRRMAYIDEGTGDPILFQHGNPTSSYLWRNIMPHCLGLGRLIACDLIGMGDSDKLDPSGPERYAYAEHRDYLDALWEALDLGDRVVLVVHDWGSALGFDWARRHRERVQGIAYMEAIAMPIEWADFPEQDRDLFQAFRSQAGEELVLQDNVFVEQVLPGLILRPLSEAEMAAYREPFLAAGEARRPTLSWPRQIPIAGTPADVVAIARDYAGWLSESPIPKLFINAEPGALTTGRMRDFCRTWPNQTEITVAGAHFIQEDSPDEIGAAIAAFVRRLRPA
 ```
 
-## Stage 1 – CD-Search Alignment (RPS-BLAST)
+# Pipeline Overview (Branch-Aware)
 
-Identifies conserved domains for each query protein sequence.
+This project is designed as a modular stage-based pipeline.
+
+Two PSSM branches are supported:
+
+| Branch | Name       | Source                               |
+| -----: | ---------- | ------------------------------------ |
+|      A | `psiblast` | PSI-BLAST generated `.pssm` profiles |
+|      B | `smp`      | parsed from CDD `.smp` matrices      |
+
+Both branches eventually converge into the same downstream structure:
+
+```
+results/pssm/reconstruct/<branch>/
+results/pssm/integrated/<branch>/
+results/pssm/filtered/<branch>/
+```
+
+# Stage 1 – CD-Search Alignment (RPS-BLAST)
+
+This stage detects conserved domains for each query protein sequence.
 
 ### Run
 
 ```bash
-bash scripts/cdsearch.sh <PROJECT_DIR> [/path/to/input.fasta]
+bash scripts/cdsearch.sh <PROJECT_DIR> <INPUT_FASTA>
 ```
 
 ### Output
 
-| File / Folder                                    | Description                |
-| ------------------------------------------------ | -------------------------- |
-| `results/cdsearch_results/cdsearch_all_hits.tsv` | All detected domains       |
-| `results/cdsearch_results/cdsearch_top_hits.tsv` | Top hit per sequence       |
-| `results/cdsearch_results/domains_fasta/`        | Extracted domain fragments |
-| `results/cdsearch_results/cdsearch_metadata.tsv` | Alignment metadata summary |
+| File / Folder                                     | Description                      |
+| ------------------------------------------------- | -------------------------------- |
+| `results/cdsearch/cdsearch_all_hits_detailed.tsv` | all domain hits                  |
+| `results/cdsearch/cdsearch_top_hits_detailed.tsv` | top domain hit per query         |
+| `results/cdsearch/domains_fasta/`                 | extracted domain FASTA fragments |
+| `results/cdsearch/cdsearch_metadata.tsv`          | execution summary                |
 
-### Example
+# Stage 2 + 3 – Branch A: Domain PSI-BLAST + PSSM Matrix Construction (`psiblast`)
 
-```text
-query_id    PSSM_ID        pident   evalue      bitscore  qstart  qend  domain_seq
-P00004      gnl|CDD|231391 86.667   1.21e-58   175.0     1       105    MKTAYIAKQRQ...
-P00651      gnl|CDD|238339 69.608   9.6e-47    146.0     29      130    YDNLKFLNVH...
-```
-
-## Stage 2 + 3 – Domain-Level PSI-BLAST and PSSM Construction
-
-This combined stage performs **PSI-BLAST** for all domain fragments obtained from Stage 1,
-and subsequently extracts PSSM matrices while computing biochemical group features.
+This branch runs PSI-BLAST against the CDD database for each extracted domain fragment,
+then converts `.pssm` profiles into residue-wise feature matrices.
 
 ### Run
 
 ```bash
-bash scripts/pssm.sh <PROJECT_DIR> [/path/to/input.fasta]
+bash scripts/pssm.sh <PROJECT_DIR> <INPUT_FASTA>
 ```
 
-### Step 2 – Domain-Level PSI-BLAST (PSSM Profile Construction)
-
-Performs **PSI-BLAST** on each domain fragment.
-
-Generates `.pssm` profiles in `results/domain_psiblast/pssm_profiles/`.
-
-| File / Folder      | Description         |
-| ------------------ | ------------------- |
-| `pssm_profiles/`   | ASCII PSSM profiles |
-| `psi_metadata.tsv` | Run summary         |
-| `psi_error.log`    | Error log           |
-
-### Step 3 – PSSM Feature Extraction and Matrix Computation
-
-Extracts 20×L PSSM matrices and computes Po / Hy / Ch + derived metrics.
-
-| Feature       | Description                             |
-| ------------- | --------------------------------------- |
-| **Po**        | Polar (S, T, Y, N, Q)                   |
-| **Hy**        | Hydrophobic (A, I, L, V, M, F, W, P, C) |
-| **Ch**        | Charged (H, D, E, K, R)                 |
-| **Hy+Ch-Po**  | Combined hydrophobic + charged tendency |
-| **\|Hy-Ch\|** | Absolute difference                     |
-
-### Example Output
-
-```text
-pos  aa  A  R  N  D  C  Q  E  G  H  I  L  K  M  F  P  S  T  W  Y  V  Po  Hy  Ch  Hy+Ch-Po  |Hy-Ch|
-1    G   0 -2  0 -1 -3 -2 -2  6 -2 -4 -4 -2 -3 -3 -2  0 -2 -3 -3 -3   2   8   4      10        4
-2    D  -2 -2  1  6 -4  0  2 -1 -1 -3 -4 -1 -3 -4 -2  0 -1 -4 -3 -3   3   6   7      10        1
-```
-
-## Stage 4 – Conservation Reconstruction and Integration
-
-This stage reconstructs **full-length residue-wise conservation profiles**
-by integrating multiple external conservation sources
-into the unified UniProt reference coordinate system.
-
-Two complementary conservation methods are supported:
-
-- **Scorecons** – domain-based conservation derived from CD-Search alignments
-- **ConSurf** – residue-level evolutionary conservation derived from MSA
-
-Both conservation scores are projected back to the
-**full-length reference protein sequence**
-and merged with reconstructed PSSM feature tables.
-
-### Overview
-
-This stage serves as the bridge between
-domain-level evolutionary analysis and
-full-length residue-wise feature representation.
-
-It enables:
-
-- Projection of conservation scores onto absolute UniProt coordinates
-- Integration of heterogeneous conservation sources
-- Construction of a unified residue-level conservation table
-
-## Stage 4.1 – Scorecons-Based Conservation Reconstruction
-
-This sub-stage reconstructs **full-length conservation scores**
-by projecting **domain-level Scorecons results**
-back to original protein coordinates using CD-Search alignment metadata.
-
-This step integrates external MSA-based conservation analysis
-with internally reconstructed full-length PSSM tables.
-
-### ⚠️ Important Prerequisite: Scorecons Server Results
-
-This pipeline **does not perform multiple sequence alignment (MSA)**
-or conservation score computation internally.
-
-Users must first compute conservation scores using the
-**Scorecons web server** and place the output files
-into the designated directory.
-
-### Required Directory Structure (Scorecons)
-
-Before running this stage, the following directory structure must exist:
+### Output (Branch A)
 
 ```
-results/
-├── conservation/
-│   └── scorecons/
-│       └── *.txt
+results/pssm/profiles/psiblast/
+results/pssm/matrices/psiblast/
+results/pssm/reconstruct/psiblast/
 ```
 
-The `query_id` must exactly match the FASTA header
-and CD-Search query ID.
+# Stage 2B – Branch B: Parse `.smp` Profiles (`smp`)
 
-During execution, the pipeline will automatically generate:
+This branch extracts domain-level PSSM matrices directly from CDD `.smp` files.
 
-```
-results/
-├── conservation/
-│   └── reconstruct/
-│       └── *.tsv
-```
-
-## Stage 4.2 – ConSurf Evolutionary Conservation Integration
-
-This sub-stage integrates **residue-level evolutionary conservation scores**
-generated by **ConSurf** into the reconstructed full-length tables.
-
-Unlike Scorecons, which is computed at the domain level,
-ConSurf conservation scores are derived from full-sequence MSA
-and often use sequence versions that differ slightly
-from the UniProt reference sequence.
-
-To address this, the pipeline implements an
-**alignment-free, variant-aware local sequence mapping strategy**
-to accurately project ConSurf scores back to
-**absolute UniProt residue coordinates**.
-
-### Design Principles
-
-The ConSurf integration module follows several strict constraints:
-
-- **Alignment-free mapping**
-  No global or pairwise sequence alignment is performed.
-
-- **Gap-free coordinate system**
-  No artificial gap positions are introduced.
-
-- **Variant-aware reconstruction**
-  Mutant sequences are restored to wild-type residues before mapping.
-
-- **Window-based local sequence matching**
-  Local similarity is detected using a sliding-window strategy.
-
-- **UniProt reference as absolute coordinate system**
-  All final conservation scores correspond to UniProt residue positions.
-
-### Required Directory Structure (ConSurf)
-
-Before running this stage, ConSurf analysis must be completed externally.
-
-```
-results/
-├── evolutionary_conservation/
-│   └── consurf/
-│       └── *_consurf_grades.txt
-```
-
-Each ConSurf grades file must match the corresponding query ID
-used in the input FASTA file.
-
-During execution, ConSurf scores are merged into:
-
-```
-results/
-├── evolutionary_conservation/
-│   └── reconstruct/
-│       └── *.tsv
-```
-
-### Run
-
-Both Scorecons reconstruction and ConSurf integration
-are executed using the same pipeline script:
+### Run (via main.py)
 
 ```bash
-bash scripts/conservation.sh <PROJECT_DIR> [/path/to/input.fasta]
+python src/main.py --stage smp_parse \
+  --smp_cdsearch_table results/cdsearch/cdsearch_top_hits_detailed.tsv \
+  --smp_root_dir blastdb/cdd \
+  --smp_matrix_output_dir results/pssm/matrices/smp
 ```
 
-## Stage 5 – Conservation-Based PSSM Feature Filtering
+### Output (Branch B)
 
-This final stage performs **conservation-aware masking of PSSM-derived features**.
+```
+results/pssm/matrices/smp/
+```
 
-All residue positions are preserved;
-however, PSSM profile features are selectively masked (`NA`)
-if evolutionary conservation criteria are not satisfied.
+# Stage 3 – Full-Length PSSM Reconstruction (Both Branches)
 
-This strategy reduces noise introduced by weakly conserved regions
-while maintaining complete positional coverage of protein sequences.
+This stage reconstructs a full-length residue-wise matrix (L × 20)
+from domain-level PSSM matrices using CD-search alignment coordinates.
 
-### Filtering Criteria
+Output is written into branch-specific folders.
 
-For each residue position, PSSM-derived features are retained only if
-**both conservation conditions are satisfied**:
+### Output
 
-```text
-EC_MIN ≤ Evolutionary conservation ≤ EC_MAX
-CONS_MIN ≤ Conservation (Scorecons) ≤ CONS_MAX
+```
+results/pssm/reconstruct/psiblast/
+results/pssm/reconstruct/smp/
+```
+
+# Stage 4 – Conservation Integration (Scorecons + ConSurf)
+
+This stage integrates two external conservation sources:
+
+- **Scorecons** → domain conservation (alignment-based)
+- **ConSurf** → evolutionary conservation (residue-level)
+
+Both are integrated into reconstructed PSSM tables and stored in:
+
+```
+results/pssm/integrated/<branch>/*.tsv
+```
+
+### Required External Inputs
+
+#### Scorecons outputs
+
+Place Scorecons `.txt` outputs into:
+
+```
+results/scorecons/*.txt
+```
+
+Each filename must match the query FASTA header:
+
+```
+<query_id>.txt
+```
+
+#### ConSurf outputs
+
+Place ConSurf grades outputs into:
+
+```
+results/consurf/*_consurf_grades.txt
+```
+
+The pipeline will automatically match ConSurf grades files using:
+
+- exact `query_id`
+- fallback `UniProt_ID`
+
+## Run (Branch-aware integration pipeline)
+
+This script automatically loops over branches.
+
+```bash
+bash scripts/conservation.sh <PROJECT_DIR> <INPUT_FASTA> [BRANCH]
 ```
 
 Where:
 
-- **Evolutionary conservation** refers to ConSurf-derived scores in Stage 4.2
-- **Conservation (Scorecons)** refers to domain-based conservation reconstructed in Stage 4.1
+- `BRANCH` = `psiblast | smp | all` (default: `all`)
 
-### Run
+### Output
+
+```
+results/pssm/integrated/psiblast/
+results/pssm/integrated/smp/
+```
+
+# Stage 5 – Conservation-Based PSSM Feature Masking
+
+This stage masks PSSM feature columns (sets to `NA`)
+if conservation thresholds are not satisfied.
+
+Filtering rule:
+
+```text
+EC_MIN   ≤ Evolutionary conservation ≤ EC_MAX
+CONS_MIN ≤ Conservation (Scorecons)  ≤ CONS_MAX
+```
+
+This stage is strict:
+
+- If Scorecons column is missing → file is skipped
+- If Evolutionary conservation column is missing → file is skipped
+
+## Run (Branch-aware)
 
 ```bash
-bash scripts/conservation_filter.sh <PROJECT_DIR> <CONS_MIN> <CONS_MAX> <EC_MIN> <EC_MAX>
+bash scripts/conservation_filter.sh <PROJECT_DIR> <EC_MIN> <EC_MAX> <CONS_MIN> <CONS_MAX> [BRANCH]
 ```
 
-## Unified Pipeline
+Where:
+
+- `BRANCH` = `psiblast | smp | all` (default: `all`)
+
+### Output
+
+```
+results/pssm/filtered/psiblast/
+results/pssm/filtered/smp/
+```
+
+# Stage 6 – Mutation Site Screening & Recall Benchmarking
+
+This stage performs grid-search based mutation site screening on
+conservation-filtered tables.
+
+Two recall metrics are computed:
+
+1.  **Standard Recall**
+2.  **Polar Recall** (restricted to residues: S, T, Y, N, Q)
+
+## Screening Rule
+
+    Hy+Ch-Po ≥ X
+    |Hy-Ch|  ≥ Y
+
+Grid search range:
+
+    Hy+Ch-Po: 1 → HYCHPO_MAX
+    |Hy-Ch| : 1 → ABS_HYCH_MAX
+
+## Run
 
 ```bash
-bash scripts/cdsearch.sh <PROJECT_DIR> [/path/to/input.fasta]
-bash scripts/pssm.sh <PROJECT_DIR> [/path/to/input.fasta]
-bash scripts/conservation.sh <PROJECT_DIR> [/path/to/input.fasta]
-bash scripts/conservation_filter.sh <PROJECT_DIR> <CONS_MIN> <CONS_MAX> <EC_MIN> <EC_MAX>
+bash scripts/mutation_site_screen.sh   <PROJECT_DIR>   <HYCHPO_MAX>   <ABS_HYCH_MAX>   <KNOWN_MUTATION_TSV>   [BRANCH]
 ```
 
-**Data Flow:**
+Example:
 
-```
-Input FASTA
- ─▶ CD-Search
- ─▶ Domain Fragments
- ─▶ PSI-BLAST
- ─▶ Domain PSSM Profiles
- ─▶ Domain PSSM Matrices
- ─▶ Full-length PSSM Reconstruction
- ─▶ Scorecons (external)
- ─▶ ConSurf (external)
- ─▶ Conservation Reconstruction & Integration
+```bash
+bash scripts/mutation_site_screen.sh   ~/PSSM   10   6   data/known_mutation_sites.tsv   all
 ```
 
-## Final Output Hierarchy
+## Recall Rules
+
+### Standard Recall
+
+    Recall = TP / N_known_sites
+
+If no ground-truth mutation sites exist:
+
+    Recall = NA
+
+### Polar Recall
+
+Restricted to mutation sites where residue ∈ {S, T, Y, N, Q}.
+
+Special cases:
+
+Condition Polar Recall Status
+
+---
+
+No GT mutation sites NA NO_GT
+No polar GT sites NA NO_POLAR_GT
+Polar GT exists Computed OK
+
+Proteins with NA Polar Recall are excluded from Polar micro recall
+calculation.
+
+## Output Structure
+
+    results/analysis/mutation_site_screen/<branch>/
+    ├── recall_summary.tsv
+    └── threshold_grid/
+
+`recall_summary.tsv` contains:
+
+- Micro Recall
+- Micro Recall (Polar)
+
+Sorted by highest Micro Recall.
+
+# Full Pipeline (Recommended)
+
+```bash
+bash scripts/setup_cdd.sh <PROJECT_DIR>
+
+bash scripts/cdsearch.sh <PROJECT_DIR> <INPUT_FASTA>
+
+# Branch A pipeline (PSI-BLAST)
+bash scripts/pssm.sh <PROJECT_DIR> <INPUT_FASTA>
+
+# Branch B pipeline (SMP parsing)
+python src/main.py --stage smp_parse \
+  --smp_cdsearch_table <PROJECT_DIR>/results/cdsearch/cdsearch_top_hits_detailed.tsv \
+  --smp_root_dir <PROJECT_DIR>/blastdb/cdd \
+  --smp_matrix_output_dir <PROJECT_DIR>/results/pssm/matrices/smp
+
+# Conservation integration (Scorecons + ConSurf)
+bash scripts/conservation.sh <PROJECT_DIR> <INPUT_FASTA> all
+
+# Conservation filtering
+bash scripts/conservation_filter.sh <PROJECT_DIR> 0.15 0.75 -1 1 all
+
+# Mutation site screening (grid search recall benchmarking)
+bash scripts/mutation_site_screen.sh <PROJECT_DIR> 10 6 data/known_mutation_sites.tsv all
+```
+
+# Final Outputs
+
+## Integrated Feature Tables
+
+After Stage 4:
 
 ```
-results/
-├── cdsearch_results/
-│   ├── alignment_blocks/
-│   ├── intermediate/
-│   ├── domains_fasta/
-│   ├── cdsearch_all_hits_detailed.tsv
-│   ├── cdsearch_top_hits_detailed.tsv
-│   └── cdsearch_metadata.tsv
-│
-├── domain_psiblast/
-│   ├── psi_metadata.tsv
-│   ├── psi_error.log
-│   ├── pssm_profiles/
-│   ├── pssm_matrices/
-│   ├── pssm_reconstruct/
-│   │   └── *.tsv
-│   ├── pssm_extract_error.log
-│   └── pssm_reconstruct_error.log
-│
-├── conservation/
-│   ├── scorecons/
-│   │   └── *.txt
-│   ├── reconstruct/
-│   │   └── *.tsv
-│
-└── conservation_filtered/
-    └── *.tsv
+results/pssm/integrated/<branch>/*.tsv
 ```
 
-## Final Model-Ready Features
+Each file contains:
 
-The final residue-level feature matrices used for downstream
-statistical analysis or machine learning models are located in:
+- Position
+- Amino acid
+- PSSM matrix columns (20 AA)
+- biochemical group features (Po/Hy/Ch)
+- Scorecons conservation column
+- ConSurf evolutionary conservation column
+
+## Model-Ready Filtered Tables
+
+After Stage 5:
 
 ```
-results/conservation_filtered/*.tsv
+results/pssm/filtered/<branch>/*.tsv
 ```
+
+These are the final recommended tables for:
+
+- downstream statistical analysis
+- ML model training
+- mutation site screening
+
+## Mutation Screening Benchmark Results
+
+After Stage 6:
+
+```
+results/analysis/mutation_site_screen/<branch>/
+├── recall_summary.tsv
+└── threshold_grid/
+```
+
+This stage provides:
+
+- Quantitative recall benchmarking
+- Polar-specific mutation performance analysis
+- Transparent threshold sensitivity evaluation
+
+# Notes
+
+## Numeric Type Stability (int vs float)
+
+Some PSSM matrices are integer-valued, while others may be float-valued.
+
+This pipeline preserves numeric stability by restoring column dtypes
+after loading/saving tables.
+
+- integer-like columns → `Int64`
+- float-like columns → `float`
+
+This prevents unwanted `int → float` drift during integration stages.
+
+# License
+
+Internal research pipeline. Modify freely for lab use.

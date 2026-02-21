@@ -4,13 +4,29 @@ PSSM Score Matrix Extraction Stage
 
 This stage extracts domain-level PSSM score matrices from ASCII PSI-BLAST output
 and computes biochemical group features (Po / Hy / Ch).
-All outputs are organized under the domain_psiblast root directory.
+
+Updated Design (Branch-aware)
+-----------------------------
+This stage now supports decoupled input/output paths:
+
+Input:
+    --pssm_profiles_dir (directory containing *.pssm)
+
+Output:
+    --pssm_matrix_output_dir (directory containing *.tsv matrices)
+
+Error Log:
+    <pssm_matrix_output_dir>/pssm_extract_error.log
+
+Legacy Support:
+    --pssm_root_dir is still supported for backward compatibility.
 """
 
 # ============================== Standard Library Imports ==============================
 import os
 import time
 from glob import glob
+from typing import Optional
 
 # ============================== Third-Party Library Imports ==============================
 import pandas as pd
@@ -88,16 +104,47 @@ def _extract_score_matrix(pssm_file: str) -> pd.DataFrame:
     )
 
 
+def _resolve_paths(
+    *,
+    pssm_root_dir: Optional[str],
+    pssm_profiles_dir: Optional[str],
+    pssm_matrix_output_dir: Optional[str],
+) -> tuple[str, str]:
+    """
+    Resolve input/output directories.
+
+    Priority:
+    - New interface: pssm_profiles_dir + pssm_matrix_output_dir
+    - Legacy interface: pssm_root_dir/pssm_profiles + pssm_root_dir/pssm_matrices
+    """
+    if pssm_profiles_dir and pssm_matrix_output_dir:
+        return pssm_profiles_dir, pssm_matrix_output_dir
+
+    if pssm_root_dir:
+        profiles_dir = os.path.join(pssm_root_dir, "pssm_profiles")
+        matrix_dir = os.path.join(pssm_root_dir, "pssm_matrices")
+        return profiles_dir, matrix_dir
+
+    raise ValueError(
+        "Must provide either:\n"
+        "  (1) pssm_profiles_dir + pssm_matrix_output_dir\n"
+        "or\n"
+        "  (2) pssm_root_dir (legacy mode)"
+    )
+
+
 # ============================== Main Stage Function ==============================
 def run_pssm_extract_matrix(**kwargs):
     """
-    Stage: extract domain-level PSSM matrices from PSI-BLAST output.
+    Stage: extract domain-level PSSM matrices from ASCII PSI-BLAST output.
 
-    Directory layout:
-        domain_psiblast/
-        ├── pssm_profiles/     (input)
-        ├── pssm_matrices/     (output)
-        └── pssm_extract_error.log
+    New Directory Layout (recommended):
+        results/pssm/profiles/psiblast/pssm_profiles/*.pssm
+            --> results/pssm/matrices/psiblast/*.tsv
+
+    Legacy Layout (still supported):
+        <pssm_root_dir>/pssm_profiles/*.pssm
+            --> <pssm_root_dir>/pssm_matrices/*.tsv
     """
     start_time = time.time()
 
@@ -105,26 +152,30 @@ def run_pssm_extract_matrix(**kwargs):
     print("║                [ PSSM Matrix Extraction Stage Started ]              ║")
     print("╚══════════════════════════════════════════════════════════════════════╝\n")
 
-    pssm_root = kwargs.get("pssm_root_dir")
-    if not pssm_root:
-        raise ValueError("pssm_root_dir must be provided")
+    pssm_root_dir = kwargs.get("pssm_root_dir")
+    pssm_profiles_dir = kwargs.get("pssm_profiles_dir")
+    pssm_matrix_output_dir = kwargs.get("pssm_matrix_output_dir")
 
-    pssm_profiles_dir = os.path.join(pssm_root, "pssm_profiles")
-    matrix_dir = os.path.join(pssm_root, "pssm_matrices")
-    log_path = os.path.join(pssm_root, "pssm_extract_error.log")
+    profiles_dir, matrix_dir = _resolve_paths(
+        pssm_root_dir=pssm_root_dir,
+        pssm_profiles_dir=pssm_profiles_dir,
+        pssm_matrix_output_dir=pssm_matrix_output_dir,
+    )
 
     os.makedirs(matrix_dir, exist_ok=True)
 
-    pssm_files = sorted(glob(os.path.join(pssm_profiles_dir, "*.pssm")))
+    log_path = os.path.join(matrix_dir, "pssm_extract_error.log")
+
+    pssm_files = sorted(glob(os.path.join(profiles_dir, "*.pssm")))
     total = len(pssm_files)
 
     if total == 0:
-        raise ValueError(f"No .pssm files found in {pssm_profiles_dir}")
+        raise ValueError(f"No .pssm files found in: {profiles_dir}")
 
-    print(f"📁 PSI-BLAST Root Dir : {pssm_root}")
-    print(f"📂 PSSM Profiles     : {pssm_profiles_dir}")
-    print(f"📁 PSSM Matrices     : {matrix_dir}")
+    print(f"📂 PSSM Profiles Dir : {profiles_dir}")
+    print(f"📁 Matrix Output Dir : {matrix_dir}")
     print(f"🐛 Error Log         : {log_path}\n")
+    print(f"🔬 Total PSSM files to process: {total}\n")
 
     success, failed = 0, 0
 

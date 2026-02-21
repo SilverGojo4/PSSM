@@ -27,9 +27,8 @@ fi
 # ======================
 # Output and database paths
 # ======================
-OUTPUT_DIR1="$PROJECT_DIR/results/cdsearch_results"
+OUTPUT_DIR1="$PROJECT_DIR/results/cdsearch"
 CDD_DB="$PROJECT_DIR/blastdb/cdd"
-CDD_DB_TABLE="$PROJECT_DIR/blastdb/cddid_all.tbl"
 
 # ======================
 # Conda environment setup
@@ -46,8 +45,7 @@ python "$PROJECT_DIR/src/main.py" \
   --stage cdsearch \
   --cdsearch_input_fasta "$INPUT_FASTA" \
   --cdsearch_output_dir "$OUTPUT_DIR1" \
-  --cdsearch_cdd_db "$CDD_DB" \
-  --cdsearch_cddid_tbl "$CDD_DB_TABLE"
+  --cdsearch_cdd_db "$CDD_DB"
 
 # ======================
 # Deactivate conda environment
