@@ -35,7 +35,7 @@ from Bio import SeqIO
 
 # ============================== Constants ==============================
 AA_ORDER = list("GAILVMFWPCSTYNQHKRDE")
-PSSM_NUMERIC_COLS = AA_ORDER + ["Po", "Hy", "Ch", "Hy+Ch-Po", "|Hy-Ch|"]
+PSSM_NUMERIC_COLS = AA_ORDER + ["Po", "Hy", "Ch", "|Hy-Ch|", "|Hy-Po|"]
 
 
 # ============================== Helper Functions ==============================

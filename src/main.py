@@ -316,23 +316,68 @@ def main():
         help="(Legacy) reconstruct directory containing integrated TSV files.",
     )
 
-    # -------------------- Mutation Site Screening Args (Grid Version) --------------------
+    # -------------------- Mutation Site Screening Args (Extended Grid Version) --------------------
     parser.add_argument(
-        "--hychpo_max",
+        "--x_min",
         type=int,
-        help="Maximum threshold for Hy+Ch-Po (grid search from 1 to this value).",
+        help="Minimum weight for Hy in score = x*Hy + y*Ch + z*Po",
     )
 
     parser.add_argument(
-        "--abs_hych_max",
+        "--x_max",
         type=int,
-        help="Maximum threshold for |Hy-Ch| (grid search from 1 to this value).",
+        help="Maximum weight for Hy in score = x*Hy + y*Ch + z*Po",
+    )
+
+    parser.add_argument(
+        "--y_min",
+        type=int,
+        help="Minimum weight for Ch in score = x*Hy + y*Ch + z*Po",
+    )
+
+    parser.add_argument(
+        "--y_max",
+        type=int,
+        help="Maximum weight for Ch in score = x*Hy + y*Ch + z*Po",
+    )
+
+    parser.add_argument(
+        "--z_min",
+        type=int,
+        help="Minimum weight for Po in score = x*Hy + y*Ch + z*Po",
+    )
+
+    parser.add_argument(
+        "--z_max",
+        type=int,
+        help="Maximum weight for Po in score = x*Hy + y*Ch + z*Po",
+    )
+
+    parser.add_argument(
+        "--score_thr_max",
+        type=int,
+        help="Maximum threshold for score filtering (score > threshold).",
+    )
+
+    parser.add_argument(
+        "--feature_thr_max",
+        type=int,
+        help="Maximum threshold for secondary feature filtering (|Hy-Ch| or |Hy-Po|).",
     )
 
     parser.add_argument(
         "--known_mutation_sites_tsv",
         type=str,
         help="TSV file containing ground truth mutation sites (columns: ID, Known Mutation Sites).",
+    )
+
+    parser.add_argument(
+        "--n_jobs",
+        type=int,
+        default=None,
+        help=(
+            "Number of CPU cores for parallel grid search.\n" "Default: cpu_count()-2"
+        ),
     )
 
     # -------------------- Parse & Dispatch --------------------

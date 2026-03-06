@@ -7,18 +7,18 @@ set -e
 if [ $# -lt 5 ]; then
   echo ""
   echo "Usage:"
-  echo "  $0 <PROJECT_DIR> <EC_MIN> <EC_MAX> <CONS_MIN> <CONS_MAX> [BRANCH]"
+  echo "  $0 <PROJECT_DIR> <CONS_MIN> <CONS_MAX> <EC_MIN> <EC_MAX> [BRANCH]"
   echo ""
   echo "Arguments:"
   echo "  PROJECT_DIR   Root directory of the project"
-  echo "  EC_MIN        Lower bound for evolutionary conservation"
-  echo "  EC_MAX        Upper bound for evolutionary conservation"
   echo "  CONS_MIN      Lower bound for Scorecons conservation"
   echo "  CONS_MAX      Upper bound for Scorecons conservation"
+  echo "  EC_MIN        Lower bound for evolutionary conservation"
+  echo "  EC_MAX        Upper bound for evolutionary conservation"
   echo "  BRANCH        Optional: psiblast | smp | all (default: all)"
   echo ""
   echo "Example:"
-  echo "  $0 ~/PSSM 0.15 0.75 -1 1 all"
+  echo "  $0 ~/PSSM 0.15 1 -1.5 10 all"
   echo ""
   exit 1
 fi
@@ -27,10 +27,10 @@ fi
 # Input arguments
 # ======================================================
 PROJECT_DIR=$1
-EC_MIN=$2
-EC_MAX=$3
-CONS_MIN=$4
-CONS_MAX=$5
+CONS_MIN=$2
+CONS_MAX=$3
+EC_MIN=$4
+EC_MAX=$5
 BRANCH=${6:-all}
 
 # ======================================================

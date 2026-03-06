@@ -117,7 +117,7 @@ def _reconstruct_full_pssm(
     columns = (
         ["Position", "Residue", "Alignment"]
         + AA_ORDER
-        + ["Po", "Hy", "Ch", "Hy+Ch-Po", "|Hy-Ch|"]
+        + ["Po", "Hy", "Ch", "|Hy-Ch|", "|Hy-Po|"]
     )
 
     out = pd.DataFrame(index=range(1, L + 1), columns=columns)
@@ -140,9 +140,7 @@ def _reconstruct_full_pssm(
             if pssm_row_index < len(domain_pssm):
                 row = domain_pssm.iloc[pssm_row_index]
 
-                values = row[
-                    AA_ORDER + ["Po", "Hy", "Ch", "Hy+Ch-Po", "|Hy-Ch|"]
-                ].values
+                values = row[AA_ORDER + ["Po", "Hy", "Ch", "|Hy-Ch|", "|Hy-Po|"]].values
                 out.loc[orig_pos, columns[3:]] = values
                 out.loc[orig_pos, "Alignment"] = "1 (aligned)"
 

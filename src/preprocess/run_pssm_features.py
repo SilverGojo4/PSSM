@@ -89,8 +89,8 @@ def _extract_score_matrix(pssm_file: str) -> pd.DataFrame:
                 "Po": po_sum,
                 "Hy": hy_sum,
                 "Ch": ch_sum,
-                "Hy+Ch-Po": (hy_sum + ch_sum) - po_sum,
                 "|Hy-Ch|": abs(hy_sum - ch_sum),
+                "|Hy-Po|": abs(hy_sum - po_sum),
             }
         )
 
@@ -100,7 +100,7 @@ def _extract_score_matrix(pssm_file: str) -> pd.DataFrame:
         rows,
         columns=["Position", "Residue"]
         + AA_ORDER
-        + ["Po", "Hy", "Ch", "Hy+Ch-Po", "|Hy-Ch|"],
+        + ["Po", "Hy", "Ch", "|Hy-Ch|", "|Hy-Po|"],
     )
 
 

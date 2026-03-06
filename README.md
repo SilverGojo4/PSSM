@@ -41,7 +41,8 @@ PSSM/
 │   ├── cdsearch.sh                    # Stage 1: CD-Search alignment
 │   ├── pssm.sh                        # Stage 2+3: PSI-BLAST PSSM build (Branch A)
 │   ├── conservation.sh                # Stage 4: Scorecons + ConSurf integration (branch-aware)
-│   └── conservation_filter.sh         # Stage 5: Conservation-based masking (branch-aware)
+│   ├── conservation_filter.sh         # Stage 5: Conservation-based masking (branch-aware)
+│   └── mutation_site_screen.sh        # Stage 6: Mutation Site Screening & Recall Benchmarking
 │
 ├── results/
 │   ├── cdsearch/
@@ -300,34 +301,40 @@ results/pssm/filtered/smp/
 
 # Stage 6 – Mutation Site Screening & Recall Benchmarking
 
-This stage performs grid-search based mutation site screening on
-conservation-filtered tables.
+This stage evaluates mutation prediction rules via **large-scale grid
+search**.
 
-Two recall metrics are computed:
+Score function:
 
-1.  **Standard Recall**
-2.  **Polar Recall** (restricted to residues: S, T, Y, N, Q)
+```text
+score = x * Hy + y * Ch + z * Po
+```
 
-## Screening Rule
+Selection rule:
 
-    Hy+Ch-Po ≥ X
-    |Hy-Ch|  ≥ Y
+```text
+score > score_thr
+AND
+feature > feature_thr
+```
 
-Grid search range:
+Where feature is:
 
-    Hy+Ch-Po: 1 → HYCHPO_MAX
-    |Hy-Ch| : 1 → ABS_HYCH_MAX
+```text
+|Hy-Ch|  (HyCh)
+|Hy-Po|  (HyPo)
+```
 
 ## Run
 
 ```bash
-bash scripts/mutation_site_screen.sh   <PROJECT_DIR>   <HYCHPO_MAX>   <ABS_HYCH_MAX>   <KNOWN_MUTATION_TSV>   [BRANCH]
+bash scripts/mutation_site_screen.sh   <PROJECT_DIR>   <X_MIN>   <X_MAX>   <Y_MIN>   <Y_MAX>   <Z_MIN>   <Z_MAX>   <SCORE_THR_MAX>   <FEATURE_THR_MAX>   <KNOWN_MUTATION_TSV>   <N_JOBS>   [BRANCH]
 ```
 
 Example:
 
 ```bash
-bash scripts/mutation_site_screen.sh   ~/PSSM   10   6   data/known_mutation_sites.tsv   all
+bash scripts/mutation_site_screen.sh   ~/PSSM   -10   10   -10   10   -10   10   10   10   known_mutation_sites.tsv   120   all
 ```
 
 ## Recall Rules
@@ -346,29 +353,40 @@ Restricted to mutation sites where residue ∈ {S, T, Y, N, Q}.
 
 Special cases:
 
-Condition Polar Recall Status
-
----
-
-No GT mutation sites NA NO_GT
-No polar GT sites NA NO_POLAR_GT
-Polar GT exists Computed OK
+| Condition            | Polar Recall | Status      |
+| -------------------- | ------------ | ----------- |
+| No GT mutation sites | NA           | NO_GT       |
+| No polar GT sites    | NA           | NO_POLAR_GT |
+| Polar GT exists      | Computed     | OK          |
 
 Proteins with NA Polar Recall are excluded from Polar micro recall
 calculation.
 
 ## Output Structure
 
-    results/analysis/mutation_site_screen/<branch>/
-    ├── recall_summary.tsv
-    └── threshold_grid/
+```text
+results/analysis/mutation_site_screen/<branch>/
+├── grid_summary.tsv
+├── grid_summary_feature_thr_0.tsv
+├── grid_summary_feature_thr_1.tsv
+├── grid_summary_feature_thr_2.tsv
+└── grid_summary_feature_thr_3.tsv
+```
 
-`recall_summary.tsv` contains:
+`grid_summary.tsv` contains the complete grid search results.
 
-- Micro Recall
-- Micro Recall (Polar)
+Each row includes:
 
-Sorted by highest Micro Recall.
+- scoring parameters
+- recall metrics
+- selected site statistics
+
+Ranking priority:
+
+1.  Micro Recall
+2.  Polar Recall
+3.  Mean Selected Sites
+4.  Formula Complexity
 
 # Full Pipeline (Recommended)
 
@@ -377,23 +395,16 @@ bash scripts/setup_cdd.sh <PROJECT_DIR>
 
 bash scripts/cdsearch.sh <PROJECT_DIR> <INPUT_FASTA>
 
-# Branch A pipeline (PSI-BLAST)
 bash scripts/pssm.sh <PROJECT_DIR> <INPUT_FASTA>
-
-# Branch B pipeline (SMP parsing)
-python src/main.py --stage smp_parse \
-  --smp_cdsearch_table <PROJECT_DIR>/results/cdsearch/cdsearch_top_hits_detailed.tsv \
-  --smp_root_dir <PROJECT_DIR>/blastdb/cdd \
-  --smp_matrix_output_dir <PROJECT_DIR>/results/pssm/matrices/smp
 
 # Conservation integration (Scorecons + ConSurf)
 bash scripts/conservation.sh <PROJECT_DIR> <INPUT_FASTA> all
 
 # Conservation filtering
-bash scripts/conservation_filter.sh <PROJECT_DIR> 0.15 0.75 -1 1 all
+bash scripts/conservation_filter.sh <PROJECT_DIR> 0.15 1 -1.5 10 all
 
 # Mutation site screening (grid search recall benchmarking)
-bash scripts/mutation_site_screen.sh <PROJECT_DIR> 10 6 data/known_mutation_sites.tsv all
+bash scripts/mutation_site_screen.sh <PROJECT_DIR> -10 10 -10 10 -10 10 10 10 data/known_mutation_sites.tsv 32 all
 ```
 
 # Final Outputs
@@ -435,13 +446,16 @@ After Stage 6:
 
 ```
 results/analysis/mutation_site_screen/<branch>/
-├── recall_summary.tsv
-└── threshold_grid/
+├── grid_summary.tsv
+├── grid_summary_feature_thr_0.tsv
+├── grid_summary_feature_thr_1.tsv
+├── grid_summary_feature_thr_2.tsv
+└── grid_summary_feature_thr_3.tsv
 ```
 
 This stage provides:
 
-- Quantitative recall benchmarking
+- Large-scale grid search benchmarking
 - Polar-specific mutation performance analysis
 - Transparent threshold sensitivity evaluation
 

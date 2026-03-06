@@ -152,8 +152,8 @@ def _convert_pssm_to_dataframe(
     po_vals = []
     hy_vals = []
     ch_vals = []
-    hychpo_vals = []
     absch_vals = []
+    abshypo_vals = []
 
     for _, r in df.iterrows():
         po = _sum_positive(r, POLAR)
@@ -163,14 +163,14 @@ def _convert_pssm_to_dataframe(
         po_vals.append(po)
         hy_vals.append(hy)
         ch_vals.append(ch)
-        hychpo_vals.append((hy + ch) - po)
         absch_vals.append(abs(hy - ch))
+        abshypo_vals.append(abs(hy - po))
 
     df["Po"] = po_vals
     df["Hy"] = hy_vals
     df["Ch"] = ch_vals
-    df["Hy+Ch-Po"] = hychpo_vals
     df["|Hy-Ch|"] = absch_vals
+    df["|Hy-Po|"] = abshypo_vals
 
     return df
 

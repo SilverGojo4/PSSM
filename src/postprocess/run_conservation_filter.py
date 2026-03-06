@@ -32,7 +32,7 @@ import pandas as pd
 
 # ============================== Constants ==============================
 AA_ORDER = list("GAILVMFWPCSTYNQHKRDE")
-FEATURE_COLS = ["Po", "Hy", "Ch", "Hy+Ch-Po", "|Hy-Ch|"]
+FEATURE_COLS = ["Po", "Hy", "Ch", "|Hy-Ch|", "|Hy-Po|"]
 PSSM_NUMERIC_COLS = AA_ORDER + FEATURE_COLS
 
 
